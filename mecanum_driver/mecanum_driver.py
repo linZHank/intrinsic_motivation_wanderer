@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """
 A simple class for driving mecanum_wheel bot with discrete action space
 """
@@ -110,7 +110,7 @@ class MecanumDriver:
             print("\nrotating counter-clockwise\n")
 
 if __name__=='__main__':
-    mec = Mecanum()
+    mec = MecanumDriver()
     for i in range(len(mec.action_options)):
         mec.set_action(i)
         time.sleep(4)
