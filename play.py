@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
-This script just collect image data with random actions.
+Deploy this script on the robot. The robot will play and collect experience data according to its imagination.
 """
 import os
 import time
@@ -8,8 +8,8 @@ import numpy as np
 import cv2
 from datetime import datetime
 
-from mecanum_driver import MecanumDriver
-from agent.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
+from drivers.mecanum_driver import MecanumDriver
+from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
 
 # Instantiate mecanum driver
 mec = MecanumDriver() # need integrate mecdriver into agent in next version
