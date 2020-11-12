@@ -12,9 +12,9 @@ from drivers.mecanum_driver import MecanumDriver
 from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
 
 # Instantiate mecanum driver
-mec = MecanumDriver() # need integrate mecdriver into agent in next version
+wanderer = MecanumDriver() # need integrate mecdriver into agent in next version
 # Get camera ready
-cap = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
+# cap = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
 # Set experience saving dir
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
 if not os.path.exists(save_dir):
@@ -25,12 +25,13 @@ if not os.path.exists(save_dir):
             raise
 
 # Preapare for experience collecting
-num_steps = 30
+total_steps = 30
+max_time_steps = 10
 dim_latent = 8
 dim_obs=(128,128,1)
 dim_act=1
 num_act = 10
-agent = IntrinsicMotivationAgent(act_type='discrete', dim_latent=dim_latent, dim_obs=dim_obs, dim_act=dim_act, num_act=num_act)
+brain = IntrinsicMotivationAgent(act_type='discrete', dim_latent=dim_latent, dim_obs=dim_obs, dim_act=dim_act, num_act=num_act)
 replay_buffer = OnPolicyBuffer(dim_act=dim_act, size=num_steps, gamma=.99, lam=.97)
 frame_counter = 0
 step_counter = 0
@@ -42,7 +43,7 @@ start_time = time.time()
 # Main loop
 try:
     while step_counter < num_steps: 
-        ret, frame = cap.read()
+        ret, frame = wanderer.cap.read()
         obs = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         cv2.imwrite(os.path.join(save_dir, str(frame_counter)+'.jpg'), obs)
         # Display the resulting frame, comment next 3 lines out if headless

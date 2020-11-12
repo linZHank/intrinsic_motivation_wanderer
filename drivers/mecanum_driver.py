@@ -27,12 +27,15 @@ class MecanumDriver:
             'cc',
         ]
         self.motor_speed = motor_speed # 0~100
+        self.cap = cv1.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
 
     def halt(self):
         self.fw_driver.stop_motor(motor_index=0)
         self.fw_driver.stop_motor(motor_index=1)
         self.rw_driver.stop_motor(motor_index=0)
         self.rw_driver.stop_motor(motor_index=1)
+        cap.release()
+        cv2.destroyAllWindows()
         print("\nSTOPPED\n")
         
     def set_action(self, action):
@@ -112,6 +115,13 @@ class MecanumDriver:
 if __name__=='__main__':
     mec = MecanumDriver()
     for i in range(len(mec.action_options)):
+        ret, frame = mec.cap.read()
+        obs = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Display the resulting frame, comment next 3 lines out if headless
+        cv2.imshow('frame', obs)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            mec.halt()
+            break
         mec.set_action(i)
         time.sleep(4)
         mec.halt()
