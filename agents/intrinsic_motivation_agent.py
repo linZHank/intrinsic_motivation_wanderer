@@ -85,6 +85,7 @@ class CategoricalActor(tf.keras.Model):
                 tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
                 tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
                 tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128),
                 tf.keras.layers.Dense(num_act)
             ]
         )
@@ -116,6 +117,7 @@ class GaussianActor(tf.keras.Model):
                 tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
                 tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
                 tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128),
                 tf.keras.layers.Dense(dim_act)
             ]
         )
@@ -149,6 +151,7 @@ class Critic(tf.keras.Model):
                 tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
                 tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
                 tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128),
                 tf.keras.layers.Dense(1)
             ]
         )
@@ -162,47 +165,66 @@ class CVAE(tf.keras.Model):
 
     def __init__(self, dim_latent, dim_obs):
         super(CVAE, self).__init__()
-        self.dim_latent = dim_latent
-        self.dim_obs = dim_obs
-        self.encoder = tf.keras.Sequential(
-            [
-                tf.keras.layers.InputLayer(input_shape=dim_obs),
-                tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Flatten(),
-                # No activation
-                tf.keras.layers.Dense(dim_latent + dim_latent),
-            ]
-        )
-
-        self.decoder = tf.keras.Sequential(
-            [
-                tf.keras.layers.InputLayer(input_shape=(dim_latent,)),
-                tf.keras.layers.Dense(units=16*16*32, activation=tf.nn.relu),
-                tf.keras.layers.Reshape(target_shape=(16, 16, 32)),
-                tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu'),
-                tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu'),
-                tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu'),
-                # No activation
-                tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same'),
-            ]
-        )
+        self.dim_latent = dim_latent # scalar
+        self.dim_obs = dim_obs # (x,y,z)
+        # construct encoder and decoder
+        inputs_img = tf.keras.Input(shape=dim_obs)
+        features_conv = tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(inputs_img)
+        features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
+        features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
+        features_dense = tf.keras.layers.Flatten()(features_conv)
+        outputs_mean = tf.keras.layers.Dense(dim_latent)(features_dense)
+        outputs_logstd = tf.keras.layers.Dense(dim_latent)(features_dense)
+        self.encoder = tf.keras.Model(inputs=inputs_img, outputs = [outputs_mean, outputs_logstd])
+        # self.encoder = tf.keras.Sequential(
+        #     [
+        #         tf.keras.layers.InputLayer(input_shape=dim_obs),
+        #         tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
+        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
+        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
+        #         tf.keras.layers.Flatten(),
+        #         # No activation
+        #         tf.keras.layers.Dense(dim_latent + dim_latent),
+        #     ]
+        # )
+        inputs_latent = tf.keras.Input(shape=(latent_dim,))
+        features_dense = tf.keras.layers.Dense(units=16*16*32, activation='relu')(inputs_latent)
+        features_conv = tf.keras.layers.Reshape(target_shape=(16, 16, 32))(features_dense)
+        features_conv = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
+        features_conv = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
+        features_conv = tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
+        outputs_img = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(features_conv)
+        self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
+        # self.decoder = tf.keras.Sequential(
+        #     [
+        #         tf.keras.layers.InputLayer(input_shape=(dim_latent,)),
+        #         tf.keras.layers.Dense(units=16*16*32, activation=tf.nn.relu),
+        #         tf.keras.layers.Reshape(target_shape=(16, 16, 32)),
+        #         tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu'),
+        #         tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu'),
+        #         tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu'),
+        #         # No activation
+        #         tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same'),
+        #     ]
+        # )
 
     @tf.function
     def sample(self, eps=None):
         if eps is None:
-            eps = tf.random.normal(shape=(100, self.dim_latent))
+            eps = tf.random.normal(shape=(100, self.latent_dim))
         return self.decode(eps, apply_sigmoid=True)
 
+    @tf.function
     def encode(self, x):
-        mean, logvar = tf.split(self.encoder(x), num_or_size_splits=2, axis=1)
-        return mean, logvar
+        mean, logstd = self.encoder(x)
+        return mean, logstd
 
-    def reparameterize(self, mean, logvar):
+    @tf.function
+    def reparameterize(self, mean, logstd):
         eps = tf.random.normal(shape=mean.shape)
-        return eps * tf.exp(logvar * .5) + mean
+        return eps*tf.math.exp(logstd) + mean
 
+    @tf.function
     def decode(self, z, apply_sigmoid=False):
         logits = self.decoder(z)
         if apply_sigmoid:
@@ -224,17 +246,20 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             self.actor = GaussianActor(dim_obs, dim_act)
         self.critic = Critic(dim_obs)
         self.autoencoder = CVAE(dim_latent=dim_latent, dim_obs = dim_obs)
-        self.imaginator = tf.keras.Sequential(
-            [
-                tf.keras.layers.InputLayer(input_shape=dim_obs),
-                tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Flatten(),
-                # No activation
-                tf.keras.layers.Dense(dim_latent + dim_latent),
-            ]
-        )
+        self.imaginator = self.autoencoder.encoder()
+        # self.imaginator = tf.keras.Sequential(
+        #     [
+        #         tf.keras.layers.InputLayer(input_shape=dim_obs),
+        #         tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
+        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
+        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
+        #         tf.keras.layers.Flatten(),
+        #         # No activation
+        #         tf.keras.layers.Dense(dim_latent + dim_latent),
+        #     ]
+        # )
+        self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
+        self.kld_prev = tf.Variable(0.)
 
     def pi_of_a_given_s(self, obs):
         with tf.GradientTape() as t:
@@ -247,5 +272,18 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         return act.numpy(), val.numpy(), logp_a.numpy()
 
     def imagine(self, obs):
-        mean, logvar = tf.split(self.imaginator(obs), num_or_size_splits=2, axis=1)
-        return mean, logvar
+        mean, logstd = self.imaginator(obs)
+        self.imagination = tfd.Normal(mean, tf.math.exp(logstd))
+
+    def compute_intrinsic_reward(self, obs):
+        """
+        KL-Divergence between imagined state and encoded state
+        """
+        mean_latent, logstd_latent = self.encoder(obs)
+        distribution_latent = tfd.Normal(mean_latent, logstd_latent)
+        kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, distribution_latent), axis=-1)
+        reward = self.kld_prev - kld
+        self.kld_prev = kld
+
+        return reward
+        
