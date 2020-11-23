@@ -38,41 +38,43 @@ num_act = 10
 # Get agent ready
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_origin=dim_origin, act_type='discrete', dim_obs=dim_obs, dim_act=dim_act, num_act=num_act)
 brain.imagine(img) 
-print("\n====Reset====\nencoded state: {} \nimagined state: {}\n".format(brain.autoencoder.encode(img), (brain.imagination.mean(), brain.imagination.stddev())))
+print("\n====Reset====\nencoded state: {} \nimagined state: {}\n".format(brain.encoder(img), (brain.imagination.mean(), brain.imagination.stddev())))
 memory = OnPolicyBuffer(dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
 obs = np.concatenate((img, brain.decoded_imagination), axis=-1)
 act, val, logp = brain.pi_of_a_given_s(obs) 
 wanderer.set_action(int(act))
 # Preapare for experience collecting
-ep_rew, ep_len = 0, 0
+ep_ret, ep_len = 0, 0
+frame_counter = 0
 episode_counter = 0
-obs_counter = 0
 step_counter = 0
+episodic_returns, sedimentary_returns = [], []
 buffer_actions = []
-buffer_obs_counters = []
+buffer_frames = []
 time_elapse = 0
 prev_time_elapse = 0
 start_time = time.time()
 # Main loop
 try:
-    for st in range(total_steps):
+    while step_counter < total_steps:
         ret, frame = eye.read()
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
+        img.resize(1,128,128,1)
         cv2.imwrite(os.path.join(save_dir, str(frame_counter)+'.jpg'), frame)
         prev_time_elapse = time_elapse
         time_elapse = time.time() - start_time
-        obs_counter+=1
+        frame_counter+=1
         if not int(time_elapse)%2 and int(prev_time_elapse)%2: # change mecanum's behavior every 2 sec
             obs = np.concatenate((img, brain.decoded_imagination), axis=-1)
-            rew = brain.compute_intrinsic_reward(np.expand_dims(img)
+            rew = brain.compute_intrinsic_reward(img)
             ep_ret+=rew
             ep_len+=1
             memory.store(act, rew, val, logp)
             act, val, logp = brain.pi_of_a_given_s(obs) 
             wanderer.set_action(int(act))
-            print("\nstep: {} \nencoded state: {} \n".format(step_counter+1, brain.autoencoder.encode(np.expand_dims(np.expand_dims(obs, -1), 0))))
+            print("\nstep: {} \nencoded state: {} \n".format(step_counter+1, brain.encoder(img)))
             step_counter+=1
-            buffer_obs_counters.append(obs_counter)
+            buffer_frames.append(frame_counter)
             # handle episode terminal
             if not step_counter%max_ep_len:
                 _, val, _ = brain.pi_of_a_given_s(obs)
@@ -80,12 +82,13 @@ try:
                 episode_counter+=1
                 episodic_returns.append(ep_ret)
                 sedimentary_returns.append(sum(episodic_returns)/episode_counter)
+                print("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {}, EpLength: {} \n----\n".format(frame_counter, episode_counter, ep_ret, ep_len))
                 # reset
-                brain.imagine(np.expand_dims(np.expand_dims(obs, -1), 0))
+                brain.imagine(img)
             
-    replay_data = replay_buffer.get()
+    replay_data = memory.get()
     np.save(os.path.join(save_dir, 'replay_buffer.npy'), replay_data)
-    np.save(os.path.join(save_dir, 'buffer_obs_counters.npy'), buffer_obs_counters)
+    np.save(os.path.join(save_dir, 'buffer_frames.npy'), buffer_frames)
 except KeyboardInterrupt:    
     print("\r\nctrl + c:")
     eye.release()

@@ -7,7 +7,7 @@ import os
 import time
 import numpy as np
 import cv2
-from motor_driver import MotorDriver
+from .motor_driver import MotorDriver
 
 class MecanumDriver:
 

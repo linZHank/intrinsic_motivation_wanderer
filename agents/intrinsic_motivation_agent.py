@@ -165,7 +165,7 @@ class Encoder(tf.keras.Model):
     Encode image into Gaussian distributions
     """
 
-    def __init__(self, dim_latent, dim_origin):
+    def __init__(self, dim_latent, dim_origin, **kwargs):
         super(Encoder, self).__init__(name='encoder', **kwargs)
         self.dim_latent = dim_latent # scalar
         self.dim_origin = dim_origin # (x,y,z)
@@ -189,7 +189,7 @@ class Decoder(tf.keras.Model):
     Decode Gaussian distributions to image
     """
 
-    def __init__(self, dim_latent):
+    def __init__(self, dim_latent, **kwargs):
         super(Decoder, self).__init__(name='decoder', **kwargs)
         self.dim_latent = dim_latent # scalar
         # construct decoder
