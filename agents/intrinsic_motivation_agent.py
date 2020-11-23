@@ -160,15 +160,17 @@ class Critic(tf.keras.Model):
     def call(self, obs):
         return tf.squeeze(self.val_net(obs), axis=-1)
 
-class CVAE(tf.keras.Model):
-    """Convolutional variational autoencoder."""
+class Encoder(tf.keras.Model):
+    """
+    Encode image into Gaussian distributions
+    """
 
-    def __init__(self, dim_latent, dim_obs):
-        super(CVAE, self).__init__()
+    def __init__(self, dim_latent, dim_origin):
+        super(Encoder, self).__init__(name='encoder', **kwargs)
         self.dim_latent = dim_latent # scalar
-        self.dim_obs = dim_obs # (x,y,z)
-        # construct encoder and decoder
-        inputs_img = tf.keras.Input(shape=dim_obs)
+        self.dim_origin = dim_origin # (x,y,z)
+        # construct encoder
+        inputs_img = tf.keras.Input(shape=dim_origin)
         features_conv = tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(inputs_img)
         features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
         features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
@@ -176,18 +178,22 @@ class CVAE(tf.keras.Model):
         outputs_mean = tf.keras.layers.Dense(dim_latent)(features_dense)
         outputs_logstd = tf.keras.layers.Dense(dim_latent)(features_dense)
         self.encoder = tf.keras.Model(inputs=inputs_img, outputs = [outputs_mean, outputs_logstd])
-        # self.encoder = tf.keras.Sequential(
-        #     [
-        #         tf.keras.layers.InputLayer(input_shape=dim_obs),
-        #         tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-        #         tf.keras.layers.Flatten(),
-        #         # No activation
-        #         tf.keras.layers.Dense(dim_latent + dim_latent),
-        #     ]
-        # )
-        inputs_latent = tf.keras.Input(shape=(latent_dim,))
+        
+    @tf.function
+    def call(self, x):
+        mean, logstd = self.encoder(x)
+        return mean, logstd
+
+class Decoder(tf.keras.Model):
+    """
+    Decode Gaussian distributions to image
+    """
+
+    def __init__(self, dim_latent):
+        super(Decoder, self).__init__(name='decoder', **kwargs)
+        self.dim_latent = dim_latent # scalar
+        # construct decoder
+        inputs_latent = tf.keras.Input(shape=(dim_latent,))
         features_dense = tf.keras.layers.Dense(units=16*16*32, activation='relu')(inputs_latent)
         features_conv = tf.keras.layers.Reshape(target_shape=(16, 16, 32))(features_dense)
         features_conv = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
@@ -195,48 +201,73 @@ class CVAE(tf.keras.Model):
         features_conv = tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
         outputs_img = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(features_conv)
         self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
-        # self.decoder = tf.keras.Sequential(
-        #     [
-        #         tf.keras.layers.InputLayer(input_shape=(dim_latent,)),
-        #         tf.keras.layers.Dense(units=16*16*32, activation=tf.nn.relu),
-        #         tf.keras.layers.Reshape(target_shape=(16, 16, 32)),
-        #         tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu'),
-        #         tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu'),
-        #         tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu'),
-        #         # No activation
-        #         tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same'),
-        #     ]
-        # )
-
+        
     @tf.function
-    def sample(self, eps=None):
-        if eps is None:
-            eps = tf.random.normal(shape=(100, self.latent_dim))
-        return self.decode(eps, apply_sigmoid=True)
-
-    @tf.function
-    def encode(self, x):
-        mean, logstd = self.encoder(x)
-        return mean, logstd
-
-    @tf.function
-    def reparameterize(self, mean, logstd):
-        eps = tf.random.normal(shape=mean.shape)
-        return eps*tf.math.exp(logstd) + mean
-
-    @tf.function
-    def decode(self, z, apply_sigmoid=False):
+    def call(self, z, apply_sigmoid=False):
         logits = self.decoder(z)
         if apply_sigmoid:
-            probs = tf.sigmoid(logits)
+            probs = tf.math.sigmoid(logits)
             return probs
         return logits
 
 
+# class CVAE(tf.keras.Model):
+#     """Convolutional variational autoencoder."""
+# 
+#     def __init__(self, dim_latent, dim_origin):
+#         super(CVAE, self).__init__()
+#         self.dim_latent = dim_latent # scalar
+#         self.dim_origin = dim_origin # (x,y,z)
+#         # construct encoder
+#         inputs_img = tf.keras.Input(shape=dim_origin)
+#         features_conv = tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(inputs_img)
+#         features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
+#         features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
+#         features_dense = tf.keras.layers.Flatten()(features_conv)
+#         outputs_mean = tf.keras.layers.Dense(dim_latent)(features_dense)
+#         outputs_logstd = tf.keras.layers.Dense(dim_latent)(features_dense)
+#         self.encoder = tf.keras.Model(inputs=inputs_img, outputs = [outputs_mean, outputs_logstd])
+#         # construct decoder
+#         inputs_latent = tf.keras.Input(shape=(dim_latent,))
+#         features_dense = tf.keras.layers.Dense(units=16*16*32, activation='relu')(inputs_latent)
+#         features_conv = tf.keras.layers.Reshape(target_shape=(16, 16, 32))(features_dense)
+#         features_conv = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
+#         features_conv = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
+#         features_conv = tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
+#         outputs_img = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(features_conv)
+#         self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
+# 
+#     @tf.function
+#     def sample(self, eps=None):
+#         if eps is None:
+#             eps = tf.random.normal(shape=(100, self.latent_dim))
+#         return self.decode(eps, apply_sigmoid=True)
+# 
+#     @tf.function
+#     def encode(self, x):
+#         mean, logstd = self.encoder(x)
+#         return mean, logstd
+# 
+#     @tf.function
+#     def reparameterize(self, mean, logstd):
+#         eps = tf.random.normal(shape=mean.shape)
+#         return eps*tf.math.exp(logstd) + mean
+# 
+#     @tf.function
+#     def decode(self, z, apply_sigmoid=False):
+#         logits = self.decoder(z)
+#         if apply_sigmoid:
+#             probs = tf.sigmoid(logits)
+#             return probs
+#         return logits
+
+
 class IntrinsicMotivationAgent(tf.keras.Model):
 
-    def __init__(self, act_type, dim_latent, dim_obs, dim_act, num_act=None, **kwargs):
+    def __init__(self, dim_latent, dim_origin, act_type, dim_obs, dim_act, num_act=None, **kwargs):
         super(IntrinsicMotivationAgent, self).__init__(name='ppo', **kwargs)
+        self.dim_latent = dim_latent
+        self.dim_origin = dim_origin
         self.act_type = act_type
         self.dim_obs = dim_obs
         self.dim_act = dim_act
@@ -245,21 +276,23 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         elif act_type == 'continuous':
             self.actor = GaussianActor(dim_obs, dim_act)
         self.critic = Critic(dim_obs)
-        self.autoencoder = CVAE(dim_latent=dim_latent, dim_obs = dim_obs)
-        self.imaginator = self.autoencoder.encoder()
-        # self.imaginator = tf.keras.Sequential(
-        #     [
-        #         tf.keras.layers.InputLayer(input_shape=dim_obs),
-        #         tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-        #         tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-        #         tf.keras.layers.Flatten(),
-        #         # No activation
-        #         tf.keras.layers.Dense(dim_latent + dim_latent),
-        #     ]
-        # )
-        self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
-        self.kld_prev = tf.Variable(0.)
+        # self.autoencoder = CVAE(dim_latent=dim_latent, dim_origin=dim_origin)
+        self.encoder = Encoder(dim_latent=dim_latent, dim_origin=dim_origin)
+        self.decoder = Decoder(dim_latent=dim_latent)
+        self.imaginator = Encoder(dim_latent=dim_latent, dim_origin=dim_origin)
+        # self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
+        # self.prev_kld = tf.Variable(0.)
+
+    @tf.function
+    def sample(self, eps=None):
+        if eps is None:
+            eps = tf.random.normal(shape=(100, self.latent_dim))
+        return self.decoder(eps, apply_sigmoid=True)
+
+    @tf.function
+    def reparameterize(self, mean, logstd):
+        eps = tf.random.normal(shape=mean.shape)
+        return eps*tf.math.exp(logstd) + mean
 
     def pi_of_a_given_s(self, obs):
         with tf.GradientTape() as t:
@@ -271,19 +304,29 @@ class IntrinsicMotivationAgent(tf.keras.Model):
 
         return act.numpy(), val.numpy(), logp_a.numpy()
 
-    def imagine(self, obs):
-        mean, logstd = self.imaginator(obs)
+    def imagine(self, img):
+        """
+        Set a goal and compute KL-Divergence between the imagination and the current state
+        """
+        mean, logstd = self.imaginator(img)
         self.imagination = tfd.Normal(mean, tf.math.exp(logstd))
+        # sample and decode imagination
+        sample_latent = self.imagination.sample()
+        self.decoded_imagination = self.decoder(sample_latent, apply_sigmoid=True)
+        # compute kl-divergence between imagined and encoded state
+        mean_latent, logstd_latent = self.encoder(img)
+        distribution_latent = tfd.Normal(mean_latent, logstd_latent)
+        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, distribution_latent), axis=-1)
 
-    def compute_intrinsic_reward(self, obs):
+    def compute_intrinsic_reward(self, img):
         """
-        KL-Divergence between imagined state and encoded state
+        kld_t - kld_{t+1}
         """
-        mean_latent, logstd_latent = self.encoder(obs)
+        mean_latent, logstd_latent = self.encoder(img)
         distribution_latent = tfd.Normal(mean_latent, logstd_latent)
         kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, distribution_latent), axis=-1)
-        reward = self.kld_prev - kld
-        self.kld_prev = kld
+        reward = self.prev_kld - kld
+        self.prev_kld = kld
 
         return reward
         
