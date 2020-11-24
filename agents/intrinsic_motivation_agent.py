@@ -279,6 +279,9 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.encoder = Encoder(dim_latent=dim_latent, dim_origin=dim_origin)
         self.decoder = Decoder(dim_latent=dim_latent)
         self.imaginator = Encoder(dim_latent=dim_latent, dim_origin=dim_origin)
+        weights_share = self.imaginator.get_weights()
+        weights_share[:-4] = self.encoder.get_weights()[:-4] # last 4 layers are dense connections from conv features to mean and logstd plus biases.
+        self.imaginator.set_weights(weights_share)
         # self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
         # self.prev_kld = tf.Variable(0.)
 
