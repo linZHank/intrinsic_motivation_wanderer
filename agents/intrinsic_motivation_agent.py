@@ -315,7 +315,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.decoded_imagination = self.decoder(sample_latent, apply_sigmoid=True)
         # compute kl-divergence between imagined and encoded state
         mean_latent, logstd_latent = self.encoder(img)
-        distribution_latent = tfd.Normal(mean_latent, logstd_latent)
+        distribution_latent = tfd.Normal(mean_latent, tf.math.exp(logstd_latent))
         self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, distribution_latent), axis=-1)
 
     def compute_intrinsic_reward(self, img):
@@ -323,10 +323,10 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         kld_t - kld_{t+1}
         """
         mean_latent, logstd_latent = self.encoder(img)
-        distribution_latent = tfd.Normal(mean_latent, logstd_latent)
+        distribution_latent = tfd.Normal(mean_latent, tf.math.exp(logstd_latent))
         kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, distribution_latent), axis=-1)
         reward = self.prev_kld - kld
         self.prev_kld = kld
 
-        return reward
+        return np.squeeze(reward)
         

@@ -72,7 +72,7 @@ try:
             memory.store(act, rew, val, logp)
             act, val, logp = brain.pi_of_a_given_s(obs) 
             wanderer.set_action(int(act))
-            print("\nstep: {} \nencoded state: {} \n".format(step_counter+1, brain.encoder(img)))
+            print("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter+1, brain.encoder(img), act, val, logp, rew, ep_ret, ep_len))
             step_counter+=1
             buffer_frames.append(frame_counter)
             # handle episode terminal
