@@ -29,9 +29,8 @@ def discount_cumsum(x, discount):
 
 class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they will be saved in hard disk.
 
-    def __init__(self, dim_act, size, gamma=0.99, lam=0.95):
-        # self.obs_buf = np.zeros([size]+list(dim_obs), dtype=np.float32)
-        # self.obs_buf = np.zeros((size, dim_obs), dtype=np.float32)
+    def __init__(self, dim_obs, dim_act, size, gamma=0.99, lam=0.95):
+        self.obs_buf = np.zeros([size]+list(dim_obs), dtype=np.float32)
         self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
         self.adv_buf = np.zeros(size, dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
@@ -41,9 +40,9 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, act, rew, val, logp):
+    def store(self, obs, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
-        # self.obs_buf[self.ptr] = obs
+        self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
@@ -69,7 +68,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        data = dict(act=self.act_buf, ret=self.ret_buf,
+        data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf)
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
 ################################################################

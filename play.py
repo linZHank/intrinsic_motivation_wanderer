@@ -39,7 +39,7 @@ num_act = 10
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_origin=dim_origin, act_type='discrete', dim_obs=dim_obs, dim_act=dim_act, num_act=num_act)
 brain.imagine(img) 
 print("\n====Reset====\nencoded state: {} \nimagined state: {}\n".format(brain.encoder(img), (brain.imagination.mean(), brain.imagination.stddev())))
-memory = OnPolicyBuffer(dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
+memory = OnPolicyBuffer(dim_obs=dim_obs, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
 obs = np.concatenate((img, brain.decoded_imagination), axis=-1)
 act, val, logp = brain.pi_of_a_given_s(obs) 
 wanderer.set_action(int(act))
@@ -69,7 +69,7 @@ try:
             rew = brain.compute_intrinsic_reward(img)
             ep_ret+=rew
             ep_len+=1
-            memory.store(act, rew, val, logp)
+            memory.store(obs, act, rew, val, logp)
             act, val, logp = brain.pi_of_a_given_s(obs) 
             wanderer.set_action(int(act))
             print("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter+1, brain.encoder(img), act, val, logp, rew, ep_ret, ep_len))
