@@ -12,7 +12,7 @@ from drivers.mecanum_driver import MecanumDriver
 from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
 
 # Parameters
-total_steps = 30
+total_steps = 300
 max_ep_len = 10
 dim_latent = 8
 dim_origin=(128,128,1)
@@ -67,10 +67,10 @@ try:
             rew = brain.compute_intrinsic_reward(img)
             ep_ret+=rew
             ep_len+=1
-            memory.store(obs, np.squeeze(brain.imagination), act, rew, val, logp)
-            print("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter+1, brain.encoder(img), act, val, logp, rew, ep_ret, ep_len))
+            memory.store(obs, np.squeeze(brain.imagination_sample), np.squeeze(brain.imagination.mean()), np.squeeze(brain.imagination.stddev()), act, rew, val, logp)
             step_counter+=1
             stepwise_frames.append(frame_counter)
+            print("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter, brain.encoder(img), act, val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
                 _, val, _ = brain.pi_of_a_given_s(obs)

@@ -31,7 +31,9 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
 
     def __init__(self, dim_obs, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
         self.obs_buf = np.zeros([size]+list(dim_obs), dtype=np.float32)
-        self.latent_buf = np.zeros([size]+list(dim_latent), dtype=np.float32)
+        self.latent_sample_buf = np.zeros([size, dim_latent], dtype=np.float32)
+        self.latent_mean_buf = np.zeros([size, dim_latent], dtype=np.float32)
+        self.latent_stddev_buf = np.zeros([size, dim_latent], dtype=np.float32)
         self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
@@ -41,10 +43,12 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, obs, latent, act, rew, val, logp):
+    def store(self, obs, latent_sample, latent_mean, latent_stddev, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
         self.obs_buf[self.ptr] = obs
-        self.latent_buf[self.ptr] = latent
+        self.latent_sample_buf[self.ptr] = latent_sample
+        self.latent_mean_buf[self.ptr] = latent_mean
+        self.latent_stddev_buf[self.ptr] = latent_stddev
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
@@ -70,7 +74,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        data = dict(obs=self.obs_buf, latent=self.latent_buf, act=self.act_buf, ret=self.ret_buf,
+        data = dict(obs=self.obs_buf, latent_sample=self.latent_sample_buf, latent_mean=self.latent_mean_buf, latent_stddev=self.latent_stddev_buf, act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf)
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
 ################################################################
@@ -315,8 +319,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         mean, logstd = self.imaginator(img)
         self.imagination = tfd.Normal(mean, tf.math.exp(logstd))
         # sample and decode imagination
-        sample_latent = self.imagination.sample()
-        self.decoded_imagination = self.decoder(sample_latent, apply_sigmoid=True)
+        self.imagination_sample = self.imagination.sample()
+        self.decoded_imagination = self.decoder(self.imagination_sample, apply_sigmoid=True) # just decode 1 sample
         # compute kl-divergence between imagined and encoded state
         mean_latent, logstd_latent = self.encoder(img)
         distribution_latent = tfd.Normal(mean_latent, tf.math.exp(logstd_latent))
