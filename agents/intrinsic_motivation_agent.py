@@ -290,6 +290,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.imaginator.set_weights(weights_share)
         # self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
         # self.prev_kld = tf.Variable(0.)
+        self.optimizer_vae = tf.keras.optimizers.Adam(3e-4)
 
     @tf.function
     def sample(self, eps=None):
@@ -338,3 +339,19 @@ class IntrinsicMotivationAgent(tf.keras.Model):
 
         return np.squeeze(reward)
         
+    def train_autoencoder(self, images):
+        def log_normal_pdf(sample, mean, logstd, raxis=1):
+            return tf.math.reduce_sum(tfd.Normal(loc=mean, scale=tf.math.exp(logstd)).log_prob(sample), axis=-1)
+        with tf.GradientTape() as tape:
+            tape.watch(self.encoder.trainable_weights + self.decoder.trainable_weights)
+            mean, logstd = self.encoder(images)
+            z = self.reparameterize(mean, logstd)
+            images_reconstructed = self.decoder(z)
+            cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=images_reconstructed, label=images)
+            logpx_z = -tf.reduce_sum(cross_ent, axis=[1, 2, 3])
+            logpz = log_normal_pdf(z, 0., 0.)
+            logqz_x = log_normal_pdf(z, mean, logstd)
+            loss_vae = -tf.math.reduce_mean(logpx_z + logpz - logqz_x)
+        gradients_vae = tape.gradient(loss_vae, self.encoder.trainable_weights+self.decoder.trainable_weights)
+        self.optimizer_vae.apply_gradients(zip(gradients_vae, self.encoder.trainable_weights+self.decoder.trainable_weights))
+
