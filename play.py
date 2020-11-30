@@ -59,7 +59,7 @@ try:
         ret, frame = eye.read()
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
         img.resize(1,128,128,1)
-        cv2.imwrite(os.path.join(save_dir, str(frame_counter)+'.jpg'), frame)
+        cv2.imwrite(os.path.join(save_dir, 'visions', str(frame_counter)+'.jpg'), frame)
         prev_time_elapse = time_elapse
         time_elapse = time.time() - start_time
         frame_counter+=1
@@ -87,6 +87,8 @@ try:
             wheels.set_action(int(act))
             
     # Save valuable items
+    with open(os.path.join(save_dir, 'elapsed_time.txt'), 'w') as f:
+        f.write("{}".format(time.time()-start_time))
     replay_buffer = memory.get()
     np.save(os.path.join(save_dir, 'replay_buffer.npy'), replay_buffer)
     np.save(os.path.join(save_dir, 'stepwise_frames.npy'), stepwise_frames)

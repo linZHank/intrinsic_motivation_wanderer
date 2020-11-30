@@ -39,13 +39,13 @@ class PCA9685:
     "Writes an 8-bit value to the specified register/address"
     self.bus.write_byte_data(self.address, reg, value)
     if (self.debug):
-      logging.info("I2C: Write 0x%02X to register 0x%02X" % (value, reg))
+      logging.debug("I2C: Write 0x%02X to register 0x%02X" % (value, reg))
 
   def read(self, reg):
     "Read an unsigned byte from the I2C device"
     result = self.bus.read_byte_data(self.address, reg)
     if (self.debug):
-      logging.info("I2C: Device 0x%X returned 0x%X from reg 0x%X" % (self.address, result & 0xFF, reg))
+      logging.debug("I2C: Device 0x%X returned 0x%X from reg 0x%X" % (self.address, result & 0xFF, reg))
     return result
 
   def setPWMFreq(self, freq):
