@@ -6,7 +6,7 @@ import numpy as np
 import scipy.signal
 import tensorflow_probability as tfp
 tfd = tfp.distributions
-
+import logging
 
 ################################################################
 """
@@ -339,19 +339,33 @@ class IntrinsicMotivationAgent(tf.keras.Model):
 
         return np.squeeze(reward)
         
-    def train_autoencoder(self, images):
+    def train_autoencoder(self, dataset, num_epochs):
+
         def log_normal_pdf(sample, mean, logstd, raxis=1):
             return tf.math.reduce_sum(tfd.Normal(loc=mean, scale=tf.math.exp(logstd)).log_prob(sample), axis=-1)
-        with tf.GradientTape() as tape:
-            tape.watch(self.encoder.trainable_weights + self.decoder.trainable_weights)
-            mean, logstd = self.encoder(images)
-            z = self.reparameterize(mean, logstd)
-            images_reconstructed = self.decoder(z)
-            cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=images_reconstructed, label=images)
-            logpx_z = -tf.reduce_sum(cross_ent, axis=[1, 2, 3])
-            logpz = log_normal_pdf(z, 0., 0.)
-            logqz_x = log_normal_pdf(z, mean, logstd)
-            loss_vae = -tf.math.reduce_mean(logpx_z + logpz - logqz_x)
-        gradients_vae = tape.gradient(loss_vae, self.encoder.trainable_weights+self.decoder.trainable_weights)
-        self.optimizer_vae.apply_gradients(zip(gradients_vae, self.encoder.trainable_weights+self.decoder.trainable_weights))
+        elbo_per_epoch = []
+        for epc in range(num_epochs):
+            step_cntr = 0
+            metrics_mean = tf.keras.metrics.Mean()
+            for batch in dataset:
+                with tf.GradientTape() as tape:
+                    tape.watch(self.encoder.trainable_weights + self.decoder.trainable_weights)
+                    mean, logstd = self.encoder(batch)
+                    z = self.reparameterize(mean, logstd)
+                    reconstructed = self.decoder(z)
+                    cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=reconstructed, labels=batch)
+                    logpx_z = -tf.reduce_sum(cross_ent, axis=[1, 2, 3])
+                    logpz = log_normal_pdf(z, 0., 0.)
+                    logqz_x = log_normal_pdf(z, mean, logstd)
+                    loss_vae = -tf.math.reduce_mean(logpx_z + logpz - logqz_x)
+                    loss_vae_mean = metrics_mean(loss_vae)
+                gradients_vae = tape.gradient(loss_vae, self.encoder.trainable_weights+self.decoder.trainable_weights)
+                self.optimizer_vae.apply_gradients(zip(gradients_vae, self.encoder.trainable_weights+self.decoder.trainable_weights))
+                step_cntr += 1
+                logging.debug("Epoch: {}, Step: {} \nVAE Loss: {}".format(epc+1, step_cntr, loss_vae))
+            elbo = -loss_vae_mean.numpy()
+            logging.info("Epoch {} ELBO: {}".format(epc+1,elbo))
+            elbo_per_epoch.append(elbo)
+        return elbo_per_epoch
+                
 

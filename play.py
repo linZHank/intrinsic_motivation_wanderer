@@ -15,9 +15,9 @@ from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivatio
 total_steps = 300
 max_ep_len = 10
 dim_latent = 8
-dim_origin=(128,128,1)
-dim_obs=(128,128,2)
-dim_act=1
+dim_origin = (128,128,1)
+dim_obs = (128,128,2)
+dim_act = 1
 num_act = 10
 # Get agent ready
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_origin=dim_origin, act_type='discrete', dim_obs=dim_obs, dim_act=dim_act, num_act=num_act)
