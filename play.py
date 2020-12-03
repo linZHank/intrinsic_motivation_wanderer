@@ -89,8 +89,8 @@ try:
     # Save valuable items
     with open(os.path.join(save_dir, 'elapsed_time.txt'), 'w') as f:
         f.write("{}".format(time.time()-start_time))
-    replay_buffer = memory.get()
-    np.save(os.path.join(save_dir, 'replay_buffer.npy'), replay_buffer)
+    replay_data = memory.get()
+    np.save(os.path.join(save_dir, 'replay_data.npy'), replay_data)
     np.save(os.path.join(save_dir, 'stepwise_frames.npy'), stepwise_frames)
     np.save(os.path.join(save_dir, 'episodic_returns.npy'), episodic_returns)
     np.save(os.path.join(save_dir, 'sedimentary_returns.npy'), sedimentary_returns)
