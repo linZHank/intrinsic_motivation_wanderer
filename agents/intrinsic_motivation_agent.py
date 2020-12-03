@@ -269,13 +269,16 @@ class Decoder(tf.keras.Model):
 
 class IntrinsicMotivationAgent(tf.keras.Model):
 
-    def __init__(self, dim_latent, dim_origin, act_type, dim_obs, dim_act, num_act=None, **kwargs):
+    def __init__(self, dim_latent, dim_origin, act_type, dim_obs, dim_act, num_act=None, clip_ratio=0.2, beta=0., target_kl=0.01, **kwargs):
         super(IntrinsicMotivationAgent, self).__init__(name='ppo', **kwargs)
         self.dim_latent = dim_latent
         self.dim_origin = dim_origin
         self.act_type = act_type
         self.dim_obs = dim_obs
         self.dim_act = dim_act
+        self.clip_ratio = clip_ratio
+        self.beta = beta
+        self.target_kl = target_kl
         if act_type == 'discrete':
             self.actor = CategoricalActor(dim_obs, num_act)
         elif act_type == 'continuous':
@@ -291,6 +294,9 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         # self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
         # self.prev_kld = tf.Variable(0.)
         self.optimizer_vae = tf.keras.optimizers.Adam(3e-4)
+        self.optimizer_actor = tf.keras.optimizers.Adam(1e-4)
+        self.optimizer_critic = tf.keras.optimizers.Adam(3e-4)
+        self.optimizer_imaginator = tf.keras.optimizers.Adam(3e-4)
 
     @tf.function
     def sample(self, eps=None):
@@ -368,4 +374,67 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             elbo_per_epoch.append(elbo)
         return elbo_per_epoch
                 
+    def train_policy(self, data, num_iters):
 
+        def normal_entropy(log_std):
+            return .5*tf.math.log(2.*np.pi*np.e*tf.math.exp(log_std)**2)
+
+        init_images = data['obs'][0:-1:10, :, :, 0]
+        # update actor
+        for i in range(num_iters):
+            logging.debug("Staring actor epoch: {}".format(i+1))
+            ep_kl = tf.convert_to_tensor([]) 
+            ep_ent = tf.convert_to_tensor([]) 
+            with tf.GradientTape() as tape:
+                tape.watch(self.actor.trainable_variables)
+                mean, logstd = self.imaginator(np.expand_dims(init_images, -1))
+                z = self.reparameterize(mean, logstd)
+                imgntn_dec = self.decoder(z)
+                obs_rec = np.zeros((data['obs'].shape[0], data['obs'].shape[1], data['obs'].shape[2], 1))
+                for j in range(30):
+                    for k in range(10):
+                        obs_rec[j*10+k,:,:,:] = imgntn_dec[j,:,:,:]
+                obs = np.concatenate((np.expand_dims(data['obs'][:,:,:,0], -1), obs_rec), -1)
+                # logp = self.actor(data['obs'], data['act']) 
+                pi, logp = self.actor(obs, data['act']) 
+                ratio = tf.math.exp(logp - data['logp']) # pi/old_pi
+                clip_adv = tf.math.multiply(tf.clip_by_value(ratio, 1-self.clip_ratio, 1+self.clip_ratio), data['adv'])
+                approx_kl = tf.reshape(data['logp'] - logp, shape=[-1])
+                ent = tf.reshape(tf.math.reduce_sum(pi.entropy(), axis=-1), shape=[-1])
+                obj = tf.math.minimum(tf.math.multiply(ratio, data['adv']), clip_adv) + self.beta*ent
+                loss_pi = -tf.math.reduce_mean(obj)
+            # gradient descent actor weights
+            grads_actor = tape.gradient(loss_pi, self.actor.trainable_variables)
+            self.optimizer_actor.apply_gradients(zip(grads_actor, self.actor.trainable_variables))
+            # record kl-divergence and entropy
+            ep_kl = tf.concat([ep_kl, approx_kl], axis=0)
+            ep_ent = tf.concat([ep_ent, ent], axis=0)
+            # log epoch
+            kl = tf.math.reduce_mean(ep_kl)
+            entropy = tf.math.reduce_mean(ep_ent)
+            logging.info("Epoch :{} \nLoss: {} \nEntropy: {} \nKLDivergence: {}".format(
+                i+1,
+                loss_pi,
+                entropy,
+                kl
+            ))
+            # early cutoff due to large kl-divergence
+            # if kl > 1.5*self.target_kl:
+            #     logging.warning("Early stopping at epoch {} due to reaching max kl-divergence.".format(epch+1))
+            #     break
+        # update critic
+        for i in range(num_iters):
+            logging.debug("Starting critic epoch: {}".format(i))
+            with tf.GradientTape() as tape:
+                tape.watch(self.critic.trainable_variables)
+                loss_v = tf.keras.losses.MSE(data['ret'], self.critic(data['obs']))
+            # gradient descent critic weights
+            grads_critic = tape.gradient(loss_v, self.critic.trainable_variables)
+            self.optimizer_critic.apply_gradients(zip(grads_critic, self.critic.trainable_variables))
+            # log epoch
+            logging.info("Epoch :{} \nLoss: {}".format(
+                i+1,
+                loss_v
+            ))
+
+        return loss_pi, loss_v, dict(kl=kl, ent=entropy) 
