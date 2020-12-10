@@ -31,9 +31,9 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
 
     def __init__(self, dim_obs, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
         self.obs_buf = np.zeros([size]+list(dim_obs), dtype=np.float32)
-        self.latent_sample_buf = np.zeros([size, dim_latent], dtype=np.float32)
-        self.latent_mean_buf = np.zeros([size, dim_latent], dtype=np.float32)
-        self.latent_stddev_buf = np.zeros([size, dim_latent], dtype=np.float32)
+        self.imagination_sample_buf = np.zeros([size, dim_latent], dtype=np.float32)
+        self.imagined_mean_buf = np.zeros([size, dim_latent], dtype=np.float32)
+        self.imagined_stddev_buf = np.zeros([size, dim_latent], dtype=np.float32)
         self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
@@ -43,12 +43,12 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, obs, latent_sample, latent_mean, latent_stddev, act, rew, val, logp):
+    def store(self, obs, imagination_sample, imagined_mean, imagined_stddev, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
         self.obs_buf[self.ptr] = obs
-        self.latent_sample_buf[self.ptr] = latent_sample
-        self.latent_mean_buf[self.ptr] = latent_mean
-        self.latent_stddev_buf[self.ptr] = latent_stddev
+        self.imagination_sample_buf[self.ptr] = imagination_sample
+        self.imagined_mean_buf[self.ptr] = imagined_mean
+        self.imagined_stddev_buf[self.ptr] = imagined_stddev
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
@@ -74,7 +74,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        data = dict(obs=self.obs_buf, latent_sample=self.latent_sample_buf, latent_mean=self.latent_mean_buf, latent_stddev=self.latent_stddev_buf, act=self.act_buf, ret=self.ret_buf,
+        data = dict(obs=self.obs_buf, imagination_sample=self.imagination_sample_buf, imagined_mean=self.imagined_mean_buf, imagined_stddev=self.imagined_stddev_buf, act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf)
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
 ################################################################
@@ -272,25 +272,25 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         """
         Set a goal and compute KL-Divergence between the imagination and the current state
         """
-        mean, logstd = self.imaginator(image)
-        self.imagination = tfd.Normal(mean, tf.math.exp(logstd))
+        imagined_mean, imagined_logstd = self.imaginator(image)
+        self.imagination = tfd.Normal(imagined_mean, tf.math.exp(imagined_logstd))
         # sample and decode imagination
-        self.imagination_sample = self.imagination.sample()
+        self.imagination_sample = self.reparameterize(imagined_mean, imagined_logstd)
         self.decoded_imagination = self.decoder(self.imagination_sample, apply_sigmoid=True) # just decode 1 sample
         # compute kl-divergence between imagined and encoded state
         encoded_mean, encoded_logstd = self.encoder(image)
-        encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, encoded_image), axis=-1)
+        self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
+        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
 
-    def compute_intrinsic_reward(self, image):
+    def compute_intrinsic_reward(self, next_image):
         """
         kld_t - kld_{t+1}
         """
-        encoded_mean, encoded_logstd = self.encoder(image)
-        encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, encoded_image), axis=-1)
+        encoded_mean, encoded_logstd = self.encoder(next_image)
+        self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
+        self.kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
         reward = self.prev_kld - kld
-        self.prev_kld = kld
+        # self.prev_kld = kld
 
         return np.squeeze(reward)
         
