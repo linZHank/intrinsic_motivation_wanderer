@@ -27,15 +27,15 @@ wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 # Get camera ready
 eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
 # eye = cv2.VideoCapture(0) # usb webcam for debugging
-ret, frame = eye.read() # obs = env.reset()
 eye.get(cv2.CAP_PROP_FPS)
-img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
-img.resize(1,128,128,1)
+ret, frame = eye.read() # obs = env.reset()
+view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
+view.resize(1,128,128,1)
 # Generate first imagination and action
-brain.imagine(img) 
+brain.imagine(view) 
 print("\n====Reset====\nencoded state: {} \nimagined state: {}\n".format(brain.encoder(img), (brain.imagination.mean(), brain.imagination.stddev())))
-obs = np.concatenate((img, brain.decoded_imagination), axis=-1)
-act, val, logp = brain.pi_of_a_given_s(obs) 
+state = np.concatenate((view, brain.decoded_imagination), axis=-1)
+act, val, logp = brain.pi_of_a_given_s(state) 
 wheels.set_action(int(act))
 # Preapare for experience collecting
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
@@ -58,33 +58,32 @@ start_time = time.time()
 try:
     while step_counter < total_steps:
         ret, frame = eye.read()
-        img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
-        img.resize(1,128,128,1)
+        view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
+        view.resize(1,128,128,1)
         cv2.imwrite(os.path.join(save_dir, 'visions', str(frame_counter)+'.jpg'), frame)
         prev_time_elapse = time_elapse
         time_elapse = time.time() - start_time
         frame_counter+=1
-        if not int(time_elapse)%2 and int(prev_time_elapse)%2: # change mecanum's behavior every 2 sec
-            rew = brain.compute_intrinsic_reward(img)
+        if int(time_elapse)-int(prev_time_elapse): # change mecanum's behavior every 1 sec
+            rew = brain.compute_intrinsic_reward(image)
             ep_ret+=rew
             ep_len+=1
-            memory.store(obs, np.squeeze(brain.imagination_sample), np.squeeze(brain.imagination.mean()), np.squeeze(brain.imagination.stddev()), act, rew, val, logp)
+            memory.store(state, np.squeeze(brain.imagination_sample), np.squeeze(brain.imagination.mean()), np.squeeze(brain.imagination.stddev()), act, rew, val, logp)
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            print("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter, brain.encoder(img), act, val, logp, rew, ep_ret, ep_len))
+            print("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter, brain.encoder(view), act, val, logp, rew, ep_ret, ep_len))
+            brain.imagine(view)
             # handle episode terminal
             if not step_counter%max_ep_len:
-                _, val, _ = brain.pi_of_a_given_s(obs)
+                _, val, _ = brain.pi_of_a_given_s(state)
                 memory.finish_path(np.squeeze(val))
                 episode_counter+=1
                 episodic_returns.append(ep_ret)
                 sedimentary_returns.append(sum(episodic_returns)/episode_counter)
                 print("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {}, EpLength: {} \n----\n".format(frame_counter, episode_counter, ep_ret, ep_len))
-                # reset
-                brain.imagine(img)
             # compute next obs, act, val, logp
-            obs = np.concatenate((img, brain.decoded_imagination), axis=-1)
-            act, val, logp = brain.pi_of_a_given_s(obs) 
+            state = np.concatenate((view, brain.decoded_imagination), axis=-1)
+            act, val, logp = brain.pi_of_a_given_s(state) 
             wheels.set_action(int(act))
             
     # Save valuable items

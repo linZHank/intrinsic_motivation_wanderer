@@ -268,27 +268,27 @@ class IntrinsicMotivationAgent(tf.keras.Model):
 
         return act.numpy(), val.numpy(), logp_a.numpy()
 
-    def imagine(self, img):
+    def imagine(self, image):
         """
         Set a goal and compute KL-Divergence between the imagination and the current state
         """
-        mean, logstd = self.imaginator(img)
+        mean, logstd = self.imaginator(image)
         self.imagination = tfd.Normal(mean, tf.math.exp(logstd))
         # sample and decode imagination
         self.imagination_sample = self.imagination.sample()
         self.decoded_imagination = self.decoder(self.imagination_sample, apply_sigmoid=True) # just decode 1 sample
         # compute kl-divergence between imagined and encoded state
-        mean_latent, logstd_latent = self.encoder(img)
-        distribution_latent = tfd.Normal(mean_latent, tf.math.exp(logstd_latent))
-        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, distribution_latent), axis=-1)
+        encoded_mean, encoded_logstd = self.encoder(image)
+        encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
+        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, encoded_image), axis=-1)
 
-    def compute_intrinsic_reward(self, img):
+    def compute_intrinsic_reward(self, image):
         """
         kld_t - kld_{t+1}
         """
-        mean_latent, logstd_latent = self.encoder(img)
-        distribution_latent = tfd.Normal(mean_latent, tf.math.exp(logstd_latent))
-        kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, distribution_latent), axis=-1)
+        encoded_mean, encoded_logstd = self.encoder(image)
+        encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
+        kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, encoded_image), axis=-1)
         reward = self.prev_kld - kld
         self.prev_kld = kld
 
