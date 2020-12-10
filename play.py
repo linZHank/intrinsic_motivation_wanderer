@@ -72,7 +72,7 @@ try:
             memory.store(state, np.squeeze(brain.imagination_sample), np.squeeze(brain.imagination.mean()), np.squeeze(brain.imagination.stddev()), act, rew, val, logp)
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            logging.info("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter, brain.encoded_image, act, val, logp, rew, ep_ret, ep_len))
+            logging.info("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length: {}".format(step_counter, brain.encoded_image, act, val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
                 _, val, _ = brain.pi_of_a_given_s(state)

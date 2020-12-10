@@ -280,7 +280,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         # compute kl-divergence between imagined and encoded state
         encoded_mean, encoded_logstd = self.encoder(image)
         self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
+        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-1)
 
     def compute_intrinsic_reward(self, next_image):
         """
@@ -288,8 +288,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         """
         encoded_mean, encoded_logstd = self.encoder(next_image)
         self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        self.kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
-        reward = self.prev_kld - kld
+        self.kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-1)
+        reward = self.prev_kld - self.kld
         # self.prev_kld = kld
 
         return np.squeeze(reward)
