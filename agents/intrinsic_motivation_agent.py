@@ -350,24 +350,20 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         def normal_entropy(log_std):
             return .5*tf.math.log(2.*np.pi*np.e*tf.math.exp(log_std)**2)
 
-        views = data['obs'][:, :, :, 0]
+        views = np.expand_dims(data['obs'][:, :, :, 0], -1) # (300,128,128,1)
         # update actor
         for i in range(num_iters):
             logging.debug("Staring actor epoch: {}".format(i+1))
             ep_kl = tf.convert_to_tensor([]) 
             ep_ent = tf.convert_to_tensor([]) 
             with tf.GradientTape() as tape:
-                tape.watch(self.actor.trainable_variables + self.imaginator.trainable_variables)
-                mean, logstd = self.imaginator(np.expand_dims(views, -1))
+                tape.watch(self.actor.trainable_weights + self.imaginator.trainable_weights)
+                mean, logstd = self.imaginator(views)
                 z = self.reparameterize(mean, logstd)
-                imgntn_dec = self.decoder(z)
-                obs_rec = np.zeros((data['obs'].shape[0], data['obs'].shape[1], data['obs'].shape[2], 1))
-                for j in range(30):
-                    for k in range(10):
-                        obs_rec[j*10+k,:,:,:] = imgntn_dec[j,:,:,:]
-                obs = np.concatenate((np.expand_dims(data['obs'][:,:,:,0], -1), obs_rec), -1)
+                imgns = self.decoder(z)
+                obs_rec = np.concatenate((views, imgns), -1)
                 # logp = self.actor(data['obs'], data['act']) 
-                pi, logp = self.actor(obs, data['act']) 
+                pi, logp = self.actor(obs_rec, data['act']) 
                 ratio = tf.math.exp(logp - data['logp']) # pi/old_pi
                 clip_adv = tf.math.multiply(tf.clip_by_value(ratio, 1-self.clip_ratio, 1+self.clip_ratio), data['adv'])
                 approx_kl = tf.reshape(data['logp'] - logp, shape=[-1])
@@ -375,8 +371,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
                 obj = tf.math.minimum(tf.math.multiply(ratio, data['adv']), clip_adv) + self.beta*ent
                 loss_pi = -tf.math.reduce_mean(obj)
             # gradient descent actor weights
-            grads_actor = tape.gradient(loss_pi, self.actor.trainable_variables + self.imaginator.trainable_variables) 
-            self.optimizer_actor.apply_gradients(zip(grads_actor, self.actor.trainable_variables + self.imaginator.trainable_variables))
+            grads_actor = tape.gradient(loss_pi, self.actor.trainable_weights + self.imaginator.trainable_weights) 
+            self.optimizer_actor.apply_gradients(zip(grads_actor, self.actor.trainable_weights + self.imaginator.trainable_weights))
             # record kl-divergence and entropy
             ep_kl = tf.concat([ep_kl, approx_kl], axis=0)
             ep_ent = tf.concat([ep_ent, ent], axis=0)
