@@ -215,6 +215,29 @@ class Decoder(tf.keras.Model):
             return probs
         return logits
 
+class Imaginator(tf.keras.Model):
+    """
+    Encode image into Gaussian distributions
+    """
+
+    def __init__(self, dim_latent, dim_origin, **kwargs):
+        super(Imaginator, self).__init__(name='encoder', **kwargs)
+        self.dim_latent = dim_latent # scalar
+        self.dim_origin = dim_origin # (x,y,z)
+        # construct imaginator with Encoder as the base
+        self.imgntr_base = Encoder(dim_latent, dim_origin)
+        imgntr_base.trainable = False # freeze imaginator base so that only header gets trained
+        inputs_img = tf.keras.Input(shape=dim_origin)
+        mean, logstd = imgntr_base(inputs_img)
+        x = tf.keras.layers.concatenate([mean, logstd])
+        outputs_mean = tf.keras.layers.Dense(dim_latent)(x)
+        outputs_logstd = tf.keras.layers.Dense(dim_latent)(x)
+        self.imaginator = tf.keras.Model(inputs=inputs_img, outputs = [outputs_mean, outputs_logstd])
+        
+    @tf.function
+    def call(self, x):
+        mean, logstd = self.imaginator(x)
+        return mean, logstd
 
 class IntrinsicMotivationAgent(tf.keras.Model):
 
@@ -236,10 +259,9 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         # self.autoencoder = CVAE(dim_latent=dim_latent, dim_origin=dim_origin)
         self.encoder = Encoder(dim_latent=dim_latent, dim_origin=dim_origin)
         self.decoder = Decoder(dim_latent=dim_latent)
-        self.imaginator = Encoder(dim_latent=dim_latent, dim_origin=dim_origin)
-        weights_share = self.imaginator.get_weights()
-        weights_share[:-4] = self.encoder.get_weights()[:-4] # last 4 layers are dense connections from conv features to mean and logstd plus biases.
-        self.imaginator.set_weights(weights_share)
+        self.imaginator = Imaginator(dim_latent=dim_latent, dim_origin=dim_origin)
+        weights_share = self.encoder.get_weights() 
+        self.imaginator.imgntr_base.set_weights(weights_share) 
         # self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
         # self.prev_kld = tf.Variable(0.)
         self.optimizer_vae = tf.keras.optimizers.Adam(3e-4)
@@ -328,15 +350,15 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         def normal_entropy(log_std):
             return .5*tf.math.log(2.*np.pi*np.e*tf.math.exp(log_std)**2)
 
-        init_images = data['obs'][0:-1:10, :, :, 0]
+        views = data['obs'][:, :, :, 0]
         # update actor
         for i in range(num_iters):
             logging.debug("Staring actor epoch: {}".format(i+1))
             ep_kl = tf.convert_to_tensor([]) 
             ep_ent = tf.convert_to_tensor([]) 
             with tf.GradientTape() as tape:
-                tape.watch(self.actor.trainable_variables)
-                mean, logstd = self.imaginator(np.expand_dims(init_images, -1))
+                tape.watch(self.actor.trainable_variables + self.imaginator.trainable_variables)
+                mean, logstd = self.imaginator(np.expand_dims(views, -1))
                 z = self.reparameterize(mean, logstd)
                 imgntn_dec = self.decoder(z)
                 obs_rec = np.zeros((data['obs'].shape[0], data['obs'].shape[1], data['obs'].shape[2], 1))
@@ -353,8 +375,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
                 obj = tf.math.minimum(tf.math.multiply(ratio, data['adv']), clip_adv) + self.beta*ent
                 loss_pi = -tf.math.reduce_mean(obj)
             # gradient descent actor weights
-            grads_actor = tape.gradient(loss_pi, self.actor.trainable_variables)
-            self.optimizer_actor.apply_gradients(zip(grads_actor, self.actor.trainable_variables))
+            grads_actor = tape.gradient(loss_pi, self.actor.trainable_variables + self.imaginator.trainable_variables) 
+            self.optimizer_actor.apply_gradients(zip(grads_actor, self.actor.trainable_variables + self.imaginator.trainable_variables))
             # record kl-divergence and entropy
             ep_kl = tf.concat([ep_kl, approx_kl], axis=0)
             ep_ent = tf.concat([ep_ent, ent], axis=0)
