@@ -41,9 +41,10 @@ wheels.set_action(int(act))
 logging.info("\n====Ignition====\n")
 # Preapare for experience collecting
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
-if not os.path.exists(save_dir):
+visions_dir = save_dir+'visions'
+if not os.path.exists(visions_dir):
     try:
-        os.makedirs(save_dir)
+        os.makedirs(visions_dir)
     except OSError as e:
         if e.errno != errno.EEXIST:
             raise
@@ -60,6 +61,7 @@ start_time = time.time()
 try:
     while step_counter < total_steps:
         ret, frame = eye.read()
+        cv2.imwrite(os.path.join(save_dir, 'visions', str(frame_counter)+'.jpg'), frame)
         prev_time_elapse = time_elapse
         time_elapse = time.time() - start_time
         frame_counter+=1
@@ -72,7 +74,7 @@ try:
             memory.store(state, np.squeeze(brain.imagination_sample), np.squeeze(brain.imagination.mean()), np.squeeze(brain.imagination.stddev()), act, rew, val, logp)
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            logging.info("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \n episode length".format(step_counter, brain.encoded_image, act, val, logp, rew, ep_ret, ep_len))
+            logging.info("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, brain.encoded_image, act, val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
                 _, val, _ = brain.pi_of_a_given_s(state)
