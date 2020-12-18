@@ -226,9 +226,9 @@ class Imaginator(tf.keras.Model):
         self.dim_origin = dim_origin # (x,y,z)
         # construct imaginator with Encoder as the base
         self.imgntr_base = Encoder(dim_latent, dim_origin)
-        imgntr_base.trainable = False # freeze imaginator base so that only header gets trained
+        self.imgntr_base.trainable = False # freeze imaginator base so that only header gets trained
         inputs_img = tf.keras.Input(shape=dim_origin)
-        mean, logstd = imgntr_base(inputs_img)
+        mean, logstd = self.imgntr_base(inputs_img)
         x = tf.keras.layers.concatenate([mean, logstd])
         outputs_mean = tf.keras.layers.Dense(dim_latent)(x)
         outputs_logstd = tf.keras.layers.Dense(dim_latent)(x)
@@ -302,7 +302,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         # compute kl-divergence between imagined and encoded state
         encoded_mean, encoded_logstd = self.encoder(image)
         self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-1)
+        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
 
     def compute_intrinsic_reward(self, next_image):
         """
@@ -310,8 +310,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         """
         encoded_mean, encoded_logstd = self.encoder(next_image)
         self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        self.kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-1)
-        reward = self.prev_kld - self.kld
+        self.kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
+        reward = self.prev_kld - kld
         # self.prev_kld = kld
 
         return np.squeeze(reward)
