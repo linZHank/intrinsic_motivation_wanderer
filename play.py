@@ -17,8 +17,8 @@ from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivatio
 total_steps = 300
 max_ep_len = 10
 dim_latent = 8
-dim_origin = (128,128,1)
-dim_obs = (128,128,2)
+dim_view = (128,128,1)
+dim_state = 4*dim_latent # (mean_encode, logstd_encode, mean_imagine, logstd_imagine)
 dim_act = 1
 num_act = 10
 # Get mecanum driver ready
@@ -28,15 +28,14 @@ wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
 eye.get(cv2.CAP_PROP_FPS)
 # Get agent ready
-brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_origin=dim_origin, act_type='discrete', dim_obs=dim_obs, dim_act=dim_act, num_act=num_act)
-memory = OnPolicyBuffer(dim_obs=dim_obs, dim_latent=dim_latent, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
+brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, act_type='discrete', dim_state=dim_state, dim_act=dim_act, num_act=num_act)
+memory = OnPolicyBuffer(dim_state=dim_state, dim_latent=dim_latent, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
 # Generate first imagination and action
 ret, frame = eye.read() # obs = env.reset()
 view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
 view.resize(1,128,128,1)
-brain.imagine(view) 
-state = np.concatenate((view, brain.decoded_imagination), axis=-1)
-act, val, logp = brain.pi_of_a_given_s(state) 
+mean_encoded, logstd_encoded = brain.encode(view) 
+act, val, logp = brain.make_decision(mean_encoded, logstd_encoded) 
 wheels.set_action(int(act))
 logging.info("\n====Ignition====\n")
 # Preapare for experience collecting

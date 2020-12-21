@@ -29,11 +29,11 @@ def discount_cumsum(x, discount):
 
 class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they will be saved in hard disk.
 
-    def __init__(self, dim_obs, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
-        self.obs_buf = np.zeros([size]+list(dim_obs), dtype=np.float32)
-        self.imagination_sample_buf = np.zeros([size, dim_latent], dtype=np.float32)
-        self.imagined_mean_buf = np.zeros([size, dim_latent], dtype=np.float32)
-        self.imagined_stddev_buf = np.zeros([size, dim_latent], dtype=np.float32)
+    def __init__(self, dim_state, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
+        self.state_buf = np.zeros((size, dim_state), dtype=np.float32)
+        self.imagination_sample_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.imagined_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.imagined_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
         self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
@@ -43,9 +43,9 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, obs, imagination_sample, imagined_mean, imagined_stddev, act, rew, val, logp):
+    def store(self, state, imagination_sample, imagined_mean, imagined_stddev, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
-        self.obs_buf[self.ptr] = obs
+        self.state_buf[self.ptr] = state
         self.imagination_sample_buf[self.ptr] = imagination_sample
         self.imagined_mean_buf[self.ptr] = imagined_mean
         self.imagined_stddev_buf[self.ptr] = imagined_stddev
@@ -74,200 +74,86 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        data = dict(obs=self.obs_buf, imagination_sample=self.imagination_sample_buf, imagined_mean=self.imagined_mean_buf, imagined_stddev=self.imagined_stddev_buf, act=self.act_buf, ret=self.ret_buf,
+        data = dict(state=self.state_buf, imagination_sample=self.imagination_sample_buf, imagined_mean=self.imagined_mean_buf, imagined_stddev=self.imagined_stddev_buf, act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf)
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
 ################################################################
 
-class CategoricalActor(tf.keras.Model):
-
-    def __init__(self, dim_obs, num_act, **kwargs):
-        super(CategoricalActor, self).__init__(name='categorical_actor', **kwargs)
-        self.logits_net = tf.keras.Sequential(
-            [
-                tf.keras.layers.InputLayer(input_shape=dim_obs),
-                tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Flatten(),
-                tf.keras.layers.Dense(128),
-                tf.keras.layers.Dense(num_act)
-            ]
-        )
-
-    def _distribution(self, obs):
-        logits = self.logits_net(obs)
-
-        return tfd.Categorical(logits=logits)
-
-    def _log_prob_from_distribution(self, pi, act):
-        return pi.log_prob(act)
-
-    def call(self, obs, act=None):
-        pi = self._distribution(obs)
-        logp_a = None
-        if act is not None:
-            logp_a = self._log_prob_from_distribution(pi, np.squeeze(act))
-
-        return pi, logp_a
-
-class GaussianActor(tf.keras.Model):
-
-    def __init__(self, dim_obs, dim_act, **kwargs):
-        super(GaussianActor, self).__init__(name='gaussian_actor', **kwargs)
-        self.mean_net = tf.keras.Sequential(
-            [
-                tf.keras.layers.InputLayer(input_shape=dim_obs),
-                tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Flatten(),
-                tf.keras.layers.Dense(128),
-                tf.keras.layers.Dense(dim_act)
-            ]
-        )
-        self.log_std = tf.Variable(initial_value=-0.5*np.ones(dim_act, dtype=np.float32))
-
-    def _distribution(self, obs):
-        mean = tf.squeeze(self.mu_net(obs))
-        std = tf.math.exp(self.log_std)
-
-        return tfd.Normal(loc=mean, scale=std)
-
-    def _log_prob_from_distribution(self, pi, act):
-        return tf.math.reduce_sum(pi.log_prob(act), axis=-1)
-
-    def call(self, obs, act=None):
-        pi = self._distribution(obs)
-        logp_a = None
-        if act is not None:
-            logp_a = self._log_prob_from_distribution(pi, act)
-
-        return pi, logp_a
-
-class Critic(tf.keras.Model):
-
-    def __init__(self, dim_obs, **kwargs):
-        super(Critic, self).__init__(name='critic', **kwargs)
-        self.val_net = tf.keras.Sequential(
-            [
-                tf.keras.layers.InputLayer(input_shape=dim_obs),
-                tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu'),
-                tf.keras.layers.Flatten(),
-                tf.keras.layers.Dense(128),
-                tf.keras.layers.Dense(1)
-            ]
-        )
-
-    @tf.function
-    def call(self, obs):
-        return tf.squeeze(self.val_net(obs), axis=-1)
-
-class Encoder(tf.keras.Model):
-    """
-    Encode image into Gaussian distributions
-    """
-
-    def __init__(self, dim_latent, dim_origin, **kwargs):
-        super(Encoder, self).__init__(name='encoder', **kwargs)
-        self.dim_latent = dim_latent # scalar
-        self.dim_origin = dim_origin # (x,y,z)
-        # construct encoder
-        inputs_img = tf.keras.Input(shape=dim_origin)
-        features_conv = tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(inputs_img)
-        features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
-        features_conv = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(features_conv)
-        features_dense = tf.keras.layers.Flatten()(features_conv)
-        outputs_mean = tf.keras.layers.Dense(dim_latent)(features_dense)
-        outputs_logstd = tf.keras.layers.Dense(dim_latent)(features_dense)
-        self.encoder = tf.keras.Model(inputs=inputs_img, outputs = [outputs_mean, outputs_logstd])
-        
-    @tf.function
-    def call(self, x):
-        mean, logstd = self.encoder(x)
-        return mean, logstd
-
-class Decoder(tf.keras.Model):
-    """
-    Decode Gaussian distributions to image
-    """
-
-    def __init__(self, dim_latent, **kwargs):
-        super(Decoder, self).__init__(name='decoder', **kwargs)
-        self.dim_latent = dim_latent # scalar
-        # construct decoder
-        inputs_latent = tf.keras.Input(shape=(dim_latent,))
-        features_dense = tf.keras.layers.Dense(units=16*16*32, activation='relu')(inputs_latent)
-        features_conv = tf.keras.layers.Reshape(target_shape=(16, 16, 32))(features_dense)
-        features_conv = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
-        features_conv = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
-        features_conv = tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu')(features_conv)
-        outputs_img = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(features_conv)
-        self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
-        
-    @tf.function
-    def call(self, z, apply_sigmoid=False):
-        logits = self.decoder(z)
-        if apply_sigmoid:
-            probs = tf.math.sigmoid(logits)
-            return probs
-        return logits
-
-class Imaginator(tf.keras.Model):
-    """
-    Encode image into Gaussian distributions
-    """
-
-    def __init__(self, dim_latent, dim_origin, **kwargs):
-        super(Imaginator, self).__init__(name='encoder', **kwargs)
-        self.dim_latent = dim_latent # scalar
-        self.dim_origin = dim_origin # (x,y,z)
-        # construct imaginator with Encoder as the base
-        self.imgntr_base = Encoder(dim_latent, dim_origin)
-        self.imgntr_base.trainable = False # freeze imaginator base so that only header gets trained
-        inputs_img = tf.keras.Input(shape=dim_origin)
-        mean, logstd = self.imgntr_base(inputs_img)
-        x = tf.keras.layers.concatenate([mean, logstd])
-        outputs_mean = tf.keras.layers.Dense(dim_latent)(x)
-        outputs_logstd = tf.keras.layers.Dense(dim_latent)(x)
-        self.imaginator = tf.keras.Model(inputs=inputs_img, outputs = [outputs_mean, outputs_logstd])
-        
-    @tf.function
-    def call(self, x):
-        mean, logstd = self.imaginator(x)
-        return mean, logstd
-
 class IntrinsicMotivationAgent(tf.keras.Model):
 
-    def __init__(self, dim_latent, dim_origin, act_type, dim_obs, dim_act, num_act=None, clip_ratio=0.2, beta=0., target_kl=0.01, **kwargs):
-        super(IntrinsicMotivationAgent, self).__init__(name='ppo', **kwargs)
+    def __init__(self, dim_latent, dim_view, act_type, dim_state, dim_act, num_act=None, clip_ratio=0.2, beta=0., target_kl=0.01, **kwargs):
+        super(IntrinsicMotivationAgent, self).__init__(name='ppo_ima', **kwargs)
+        # parameters
         self.dim_latent = dim_latent
         self.dim_origin = dim_origin
         self.act_type = act_type
-        self.dim_obs = dim_obs
+        self.dim_state = dim_state
         self.dim_act = dim_act
         self.clip_ratio = clip_ratio
         self.beta = beta
         self.target_kl = target_kl
-        if act_type == 'discrete':
-            self.actor = CategoricalActor(dim_obs, num_act)
-        elif act_type == 'continuous':
-            self.actor = GaussianActor(dim_obs, dim_act)
-        self.critic = Critic(dim_obs)
-        # self.autoencoder = CVAE(dim_latent=dim_latent, dim_origin=dim_origin)
-        self.encoder = Encoder(dim_latent=dim_latent, dim_origin=dim_origin)
-        self.decoder = Decoder(dim_latent=dim_latent)
-        self.imaginator = Imaginator(dim_latent=dim_latent, dim_origin=dim_origin)
-        weights_share = self.encoder.get_weights() 
-        self.imaginator.imgntr_base.set_weights(weights_share) 
-        # self.imagination = tfd.Normal(loc=tf.zeros(dim_latent), scale=tf.zeros(dim_latent))
-        # self.prev_kld = tf.Variable(0.)
+
+        # construct encoder
+        inputs = tf.keras.Input(shape=dim_view, name='image_input')
+        x = tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(inputs_img)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(x)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(x)
+        x = tf.keras.layers.Flatten()(features_conv)
+        outputs_mean = tf.keras.layers.Dense(dim_latent, name='encoded_mean')(x)
+        outputs_logstd = tf.keras.layers.Dense(dim_latent, name='encoded_logstd')(x)
+        self.encoder = tf.keras.Model(inputs=inputs, outputs = [outputs_mean, outputs_logstd])
+
+        # construct decoder
+        inputs_latent = tf.keras.Input(shape=(dim_latent,), name='latent_feature')
+        x = tf.keras.layers.Dense(units=16*16*32, activation='relu')(inputs_latent) # only valid for reconstructing (128,128,1) image; TODO: generalize to any shape
+        x = tf.keras.layers.Reshape(target_shape=(16, 16, 32))(x)
+        x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(x)
+        x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(x)
+        x = tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same', activation='relu')(x)
+        outputs_img = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same', name='decoded_image')(x)
+        self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
+
+        # construct imaginator
+        inputs_mean = tf.keras.Input(shape=dim_latent, name='original_mean')
+        inputs_logstd = tf.keras.Input(shape=dim_latent, name='original_logstd')
+        x = tf.keras.layers.concatenate([inputs_mean, inputs_logstd])
+        x = tf.keras.layers.Dense(dim_latent*2, activation='relu')
+        outputs_mean = tf.keras.layers.Dense(dim_latent, name='imagined_mean')(x)
+        outputs_logstd = tf.keras.layers.Dense(dim_latent, name='imagined_logstd')(x)
+        self.imaginator = tf.keras.Model(inputs=[inputs_mean, inputs_logstd], outputs=[outputs_mean, outputs_logstd])
+
+        # construct actor
+        inputs_em = tf.keras.Input(shape=dim_state, name='actor_state')
+        inputs_el = tf.keras.Input(shape=dim_state, name='actor_state')
+        inputs_im = tf.keras.Input(shape=dim_state, name='actor_state')
+        inputs_il = tf.keras.Input(shape=dim_state, name='actor_state')
+        x = tf.keras.layers.concatenate([inputs_em, inputs_el, inputs_im, inputs_il])
+        x = tf.keras.layers.Dense(128, activation='relu')(x)
+        x = tf.keras.layers.Dense(128, activation='relu')(x)
+        logits = tf.keras.layers.Dense(num_act, activatio='tanh', name='act')(x)
+        self.actor = tf.keras.Model(inputs=[inputs_em,inputs_el,inputs_im,inputs_il], outputs=logits)
+
+        # construct critic
+        inputs_em = tf.keras.Input(shape=dim_state, name='critic_state')
+        inputs_el = tf.keras.Input(shape=dim_state, name='critic_state')
+        inputs_im = tf.keras.Input(shape=dim_state, name='critic_state')
+        inputs_il = tf.keras.Input(shape=dim_state, name='critic_state')
+        x = tf.keras.layers.concatenate([inputs_em, inputs_el, inputs_im, inputs_il])
+        x = tf.keras.layers.Dense(128, activation='relu')(inputs_state)
+        x = tf.keras.layers.Dense(128, activation='relu')(x)
+        outputs_value = tf.keras.layers.Dense(1, name='value')(x)
+        self.critic = tf.keras.Model(inputs=[inputs_em,inputs_el,inputs_im,inputs_il], outputs=outputs_value)
+
+        # set up optimizers
         self.optimizer_vae = tf.keras.optimizers.Adam(3e-4)
         self.optimizer_actor = tf.keras.optimizers.Adam(1e-4)
         self.optimizer_critic = tf.keras.optimizers.Adam(3e-4)
         self.optimizer_imaginator = tf.keras.optimizers.Adam(3e-4)
+
+    @tf.function
+    def encode(self, img):
+        mean_e, logstd_e = self.encoder(img)
+        return mean_e, logstd_e
 
     @tf.function
     def sample(self, eps=None):
@@ -280,29 +166,54 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         eps = tf.random.normal(shape=mean.shape)
         return eps*tf.math.exp(logstd) + mean
 
-    def pi_of_a_given_s(self, obs):
-        with tf.GradientTape() as t:
-            with t.stop_recording():
-                pi = self.actor._distribution(obs) # policy distribution (Gaussian)
-                act = tf.squeeze(pi.sample())
-                logp_a = self.actor._log_prob_from_distribution(pi, act)
-                val = tf.squeeze(self.critic(obs), axis=-1)
+    @tf.function
+    def decode(self, z, apply_sigmoid=False):
+        logits = self.decoder(z)
+        if apply_sigmoid:
+            probs = tf.math.sigmoid(logits)
+            return probs
+        return logits
+
+    @tf.function
+    def imagine(self, mean, logstd):
+        mean_i, logstd_i= self.imaginator(mean, logstd) 
+        return mean_i, logstd_i
+
+    def compute_logprob(self, state, act=None):
+        pi = tfd.Categorical(logits=self.actor(state))
+        logp_a = None
+        if act is not None:
+            logp_a = pi.log_prob(np.squeeze(act))
+
+        return pi, logp_a
+
+    @tf.function
+    def compute_value(self, mean_encoded, logstd_encoded, mean_imagined, logstd_imagined):
+        return tf.squeeze(self.critic([mean_encoded,logstd_encoded,mean_imagined,logstd_imagined]), axis=-1)
+
+    def make_decision(self, mean_encoded, logstd_encoded):
+        mean_imagined, logstd_imagined = self.imagine(mean_encoded, logstd_encoded)
+        pi = tfd.Categorical(logits=self.actor([mean_encoded,logstd_encoded,mean_imagined,logstd_imagined])
+        act = tf.squeeze(pi.sample())
+        logp_a = pi.log_prob(act)
+        val = self.compute_value([mean_encoded,logstd_encoded,mean_imagined,logstd_imagined])
 
         return act.numpy(), val.numpy(), logp_a.numpy()
 
-    def imagine(self, image):
-        """
-        Set a goal and compute KL-Divergence between the imagination and the current state
-        """
-        imagined_mean, imagined_logstd = self.imaginator(image)
-        self.imagination = tfd.Normal(imagined_mean, tf.math.exp(imagined_logstd))
-        # sample and decode imagination
-        self.imagination_sample = self.reparameterize(imagined_mean, imagined_logstd)
-        self.decoded_imagination = self.decoder(self.imagination_sample, apply_sigmoid=True) # just decode 1 sample
-        # compute kl-divergence between imagined and encoded state
-        encoded_mean, encoded_logstd = self.encoder(image)
-        self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
+    # def imagine(self, view):
+    #     """
+    #     Set a goal and compute KL-Divergence between the imagination and the current state
+    #     """
+    #     imagined_mean, imagined_logstd = self.imaginator(image)
+    #     self.imagination = tfd.Normal(imagined_mean, tf.math.exp(imagined_logstd))
+    #     # sample and decode imagination
+    #     self.imagination_sample = self.reparameterize(imagined_mean, imagined_logstd)
+    #     self.decoded_imagination = self.decoder(self.imagination_sample, apply_sigmoid=True) # just decode 1 sample
+    #     # compute kl-divergence between imagined and encoded state
+    #     encoded_mean, encoded_logstd = self.encoder(image)
+    #     self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
+    #     self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
+
 
     def compute_intrinsic_reward(self, next_image):
         """
@@ -350,7 +261,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         def normal_entropy(log_std):
             return .5*tf.math.log(2.*np.pi*np.e*tf.math.exp(log_std)**2)
 
-        views = np.expand_dims(data['obs'][:, :, :, 0], -1) # (300,128,128,1)
+        views = np.expand_dims(data['state'][:, :, :, 0], -1) # (300,128,128,1)
         # update actor
         for i in range(num_iters):
             logging.debug("Staring actor epoch: {}".format(i+1))
@@ -361,9 +272,9 @@ class IntrinsicMotivationAgent(tf.keras.Model):
                 mean, logstd = self.imaginator(views)
                 z = self.reparameterize(mean, logstd)
                 imgns = self.decoder(z)
-                obs_rec = np.concatenate((views, imgns), -1)
-                # logp = self.actor(data['obs'], data['act']) 
-                pi, logp = self.actor(obs_rec, data['act']) 
+                state_rec = np.concatenate((views, imgns), -1)
+                # logp = self.actor(data['state'], data['act']) 
+                pi, logp = self.actor(state_rec, data['act']) 
                 ratio = tf.math.exp(logp - data['logp']) # pi/old_pi
                 clip_adv = tf.math.multiply(tf.clip_by_value(ratio, 1-self.clip_ratio, 1+self.clip_ratio), data['adv'])
                 approx_kl = tf.reshape(data['logp'] - logp, shape=[-1])
@@ -394,7 +305,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             logging.debug("Starting critic epoch: {}".format(i))
             with tf.GradientTape() as tape:
                 tape.watch(self.critic.trainable_variables)
-                loss_v = tf.keras.losses.MSE(data['ret'], self.critic(data['obs']))
+                loss_v = tf.keras.losses.MSE(data['ret'], self.critic(data['state']))
             # gradient descent critic weights
             grads_critic = tape.gradient(loss_v, self.critic.trainable_variables)
             self.optimizer_critic.apply_gradients(zip(grads_critic, self.critic.trainable_variables))
