@@ -34,9 +34,10 @@ memory = OnPolicyBuffer(dim_state=dim_state, dim_latent=dim_latent, dim_act=dim_
 ret, frame = eye.read() # obs = env.reset()
 view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
 view.resize(1,128,128,1)
-mean_encoded, logstd_encoded = brain.encode(view) 
-act, val, logp = brain.make_decision(mean_encoded, logstd_encoded) 
+latent = brain.encode(view) 
+act, val, logp = brain.make_decision(latent) 
 wheels.set_action(int(act))
+imagination = brain.imagine(latent, act)
 logging.info("\n====Ignition====\n")
 # Preapare for experience collecting
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
@@ -64,29 +65,30 @@ try:
         prev_time_elapse = time_elapse
         time_elapse = time.time() - start_time
         frame_counter+=1
-        if int(time_elapse)-int(prev_time_elapse): # change mecanum's behavior every 1 sec
-            view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
-            view.resize(1,128,128,1)
-            rew = brain.compute_intrinsic_reward(view)
+        if int(time_elapse)-int(prev_time_elapse): # take action every 1 sec
+            next_view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
+            next_view.resize(1,128,128,1)
+            next_latent = brain.encode(next_view)
+            rew = brain.compute_intrinsic_reward(latent, imagination, next_latent)
             ep_ret+=rew
             ep_len+=1
-            memory.store(state, np.squeeze(brain.imagination_sample), np.squeeze(brain.imagination.mean()), np.squeeze(brain.imagination.stddev()), act, rew, val, logp)
+            memory.store(np.squeeze(latent.mean()), np.squeeze(latent.stddev()), np.squeeze(imagination.mean()), np.squeeze(imagination.stddev()), act, rew, val, logp)
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            logging.info("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, brain.encoded_image, act, val, logp, rew, ep_ret, ep_len))
+            logging.info("\nstep: {} \nencoded view: {} \nimagination: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, (latent.mean(),latent.stddev), (imagination.mean(), imagination.stddev()), act, val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
-                _, val, _ = brain.pi_of_a_given_s(state)
+                _, val, _ = brain.make_decision(latent)
                 memory.finish_path(np.squeeze(val))
                 episode_counter+=1
                 episodic_returns.append(ep_ret)
                 sedimentary_returns.append(sum(episodic_returns)/episode_counter)
                 logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {}, EpLength: {} \n----\n".format(frame_counter, episode_counter, ep_ret, ep_len))
             # compute next obs, act, val, logp
-            brain.imagine(view)
-            state = np.concatenate((view, brain.decoded_imagination), axis=-1)
-            act, val, logp = brain.pi_of_a_given_s(state) 
+            latent = next_latent 
+            act, val, logp = brain.make_decision(latent) 
             wheels.set_action(int(act))
+            imagination = brain.imagine(latent, act)
             
     # Save valuable items
     with open(os.path.join(save_dir, 'elapsed_time.txt'), 'w') as f:
