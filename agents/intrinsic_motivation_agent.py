@@ -29,11 +29,11 @@ def discount_cumsum(x, discount):
 
 class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they will be saved in hard disk.
 
-    def __init__(self, dim_state, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
-        self.state_buf = np.zeros((size, dim_state), dtype=np.float32)
-        self.imagination_sample_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.imagined_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.imagined_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
+    def __init__(self, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
+        self.latent_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.latent_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.imagination_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.imagination_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
         self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
@@ -43,12 +43,12 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, state, imagination_sample, imagined_mean, imagined_stddev, act, rew, val, logp):
+    def store(self, latent_mean, latent_stddev, imagination_mean, imagination_stddev, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
-        self.state_buf[self.ptr] = state
-        self.imagination_sample_buf[self.ptr] = imagination_sample
-        self.imagined_mean_buf[self.ptr] = imagined_mean
-        self.imagined_stddev_buf[self.ptr] = imagined_stddev
+        self.latent_mean_buf[self.ptr] = latent_mean
+        self.latent_stddev_buf[self.ptr] = latent_stddev
+        self.imagination_mean_buf[self.ptr] = imagination_mean
+        self.imagination_stddev_buf[self.ptr] = imagination_stddev
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
@@ -74,8 +74,16 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        data = dict(state=self.state_buf, imagination_sample=self.imagination_sample_buf, imagined_mean=self.imagined_mean_buf, imagined_stddev=self.imagined_stddev_buf, act=self.act_buf, ret=self.ret_buf,
-                    adv=self.adv_buf, logp=self.logp_buf)
+        data = dict(
+            latent_mean=self.latent_mean_buf, 
+            latent_stddev=self.latent_stddev_buf, 
+            imagination_mean=self.imagination_mean_buf, 
+            imagination_stddev=self.imagination_stddev_buf, 
+            act=self.act_buf, 
+            ret=self.ret_buf, 
+            adv=self.adv_buf, 
+            logp=self.logp_buf
+        )
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
 ################################################################
 
@@ -151,11 +159,6 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.optimizer_imaginator = tf.keras.optimizers.Adam(3e-4)
 
     @tf.function
-    def encode(self, img):
-        mean_e, logstd_e = self.encoder(img)
-        return mean_e, logstd_e
-
-    @tf.function
     def sample(self, eps=None):
         if eps is None:
             eps = tf.random.normal(shape=(100, self.latent_dim))
@@ -166,6 +169,10 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         eps = tf.random.normal(shape=mean.shape)
         return eps*tf.math.exp(logstd) + mean
 
+    def encode(self, img):
+        mean, logstd = self.encoder(img)
+        return tfd.Normal(loc=mean, scale=tf.math.exp(logstd))
+
     @tf.function
     def decode(self, z, apply_sigmoid=False):
         logits = self.decoder(z)
@@ -174,29 +181,32 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             return probs
         return logits
 
-    @tf.function
-    def imagine(self, mean, logstd):
-        mean_i, logstd_i= self.imaginator(mean, logstd) 
-        return mean_i, logstd_i
+    def imagine(self, latent_distribution, act):
+        mean = latent_distribution.mean() 
+        stddev = latent_distribution.stddev()
+        mean_imgn, logstd_imgn = self.imaginator([mean, stddev, act])
+        return tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
 
-    def compute_logprob(self, state, act=None):
-        pi = tfd.Categorical(logits=self.actor(state))
-        logp_a = None
-        if act is not None:
-            logp_a = pi.log_prob(np.squeeze(act))
+    # def compute_logprob(self, state, act=None):
+    #     pi = tfd.Categorical(logits=self.actor(state))
+    #     logp_a = None
+    #     if act is not None:
+    #         logp_a = pi.log_prob(np.squeeze(act))
 
-        return pi, logp_a
+    #     return pi, logp_a
 
-    @tf.function
-    def compute_value(self, mean_encoded, logstd_encoded, mean_imagined, logstd_imagined):
-        return tf.squeeze(self.critic([mean_encoded,logstd_encoded,mean_imagined,logstd_imagined]), axis=-1)
+    def compute_value(self, latent_distribution):
+        mean = latent_distribution.mean() 
+        stddev = latent_distribution.stddev()
+        return tf.squeeze(self.critic([mean, stddev]), axis=-1)
 
-    def make_decision(self, mean_encoded, logstd_encoded):
-        mean_imagined, logstd_imagined = self.imagine(mean_encoded, logstd_encoded)
-        pi = tfd.Categorical(logits=self.actor([mean_encoded,logstd_encoded,mean_imagined,logstd_imagined])
+    def make_decision(self, latent_distribution):
+        mean = latent_distribution.mean() 
+        stddev = latent_distribution.stddev()
+        pi = tfd.Categorical(logits=self.actor([mean, stddev])
         act = tf.squeeze(pi.sample())
         logp_a = pi.log_prob(act)
-        val = self.compute_value([mean_encoded,logstd_encoded,mean_imagined,logstd_imagined])
+        val = self.compute_value(latent_distribution)
 
         return act.numpy(), val.numpy(), logp_a.numpy()
 
@@ -215,15 +225,13 @@ class IntrinsicMotivationAgent(tf.keras.Model):
     #     self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
 
 
-    def compute_intrinsic_reward(self, next_image):
+    def compute_intrinsic_reward(self, latent_distribution, imagined_distribution, next_latent_distribution):
         """
         kld_t - kld_{t+1}
         """
-        encoded_mean, encoded_logstd = self.encoder(next_image)
-        self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-        self.kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
-        reward = self.prev_kld - kld
-        # self.prev_kld = kld
+        kld_curr = tf.math.reduce_sum(tfd.kl_divergence(imagined_distribution, latent_distribution), axis=-1)
+        kld_next = tf.math.reduce_sum(tfd.kl_divergence(imagined_distribution, next_latent_distribution), axis=-1)
+        reward = kld_curr - kld_next
 
         return np.squeeze(reward)
         

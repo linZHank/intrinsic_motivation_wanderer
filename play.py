@@ -85,7 +85,7 @@ try:
                 sedimentary_returns.append(sum(episodic_returns)/episode_counter)
                 logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {}, EpLength: {} \n----\n".format(frame_counter, episode_counter, ep_ret, ep_len))
             # compute next obs, act, val, logp
-            latent = next_latent 
+            latent = next_latent # SUPER CRITICAL!!!
             act, val, logp = brain.make_decision(latent) 
             wheels.set_action(int(act))
             imagination = brain.imagine(latent, act)
