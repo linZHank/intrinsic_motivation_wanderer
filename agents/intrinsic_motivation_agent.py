@@ -122,35 +122,32 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
 
         # construct imaginator
-        inputs_mean = tf.keras.Input(shape=dim_latent, name='original_mean')
-        inputs_logstd = tf.keras.Input(shape=dim_latent, name='original_logstd')
-        x = tf.keras.layers.concatenate([inputs_mean, inputs_logstd])
-        x = tf.keras.layers.Dense(dim_latent*2, activation='relu')
+        inputs_mean = tf.keras.Input(shape=dim_latent, name='imaginator_input_mean')
+        inputs_stddev = tf.keras.Input(shape=dim_latent, name='imaginator_input_stddev')
+        inputs_act = tf.keras.Input(shape=dim_act, name='imaginator_input_act')
+        x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev, inputs_act])
+        x = tf.keras.layers.Dense(dim_latent*2, activation='relu')(x)
         outputs_mean = tf.keras.layers.Dense(dim_latent, name='imagined_mean')(x)
         outputs_logstd = tf.keras.layers.Dense(dim_latent, name='imagined_logstd')(x)
-        self.imaginator = tf.keras.Model(inputs=[inputs_mean, inputs_logstd], outputs=[outputs_mean, outputs_logstd])
+        self.imaginator = tf.keras.Model(inputs=[inputs_mean, inputs_stddev, inputs_act], outputs=[outputs_mean, outputs_logstd])
 
         # construct actor
-        inputs_em = tf.keras.Input(shape=dim_state, name='actor_state')
-        inputs_el = tf.keras.Input(shape=dim_state, name='actor_state')
-        inputs_im = tf.keras.Input(shape=dim_state, name='actor_state')
-        inputs_il = tf.keras.Input(shape=dim_state, name='actor_state')
-        x = tf.keras.layers.concatenate([inputs_em, inputs_el, inputs_im, inputs_il])
+        inputs_mean = tf.keras.Input(shape=dim_state, name='actor_input_mean')
+        inputs_stddev = tf.keras.Input(shape=dim_state, name='actor_input_stddev')
+        x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev])
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
-        logits = tf.keras.layers.Dense(num_act, activatio='tanh', name='act')(x)
-        self.actor = tf.keras.Model(inputs=[inputs_em,inputs_el,inputs_im,inputs_il], outputs=logits)
+        logits = tf.keras.layers.Dense(num_act, activatio='tanh', name='act_logits')(x)
+        self.actor = tf.keras.Model(inputs=[inputs_mean, inputs_stddev], outputs=logits)
 
         # construct critic
-        inputs_em = tf.keras.Input(shape=dim_state, name='critic_state')
-        inputs_el = tf.keras.Input(shape=dim_state, name='critic_state')
-        inputs_im = tf.keras.Input(shape=dim_state, name='critic_state')
-        inputs_il = tf.keras.Input(shape=dim_state, name='critic_state')
-        x = tf.keras.layers.concatenate([inputs_em, inputs_el, inputs_im, inputs_il])
-        x = tf.keras.layers.Dense(128, activation='relu')(inputs_state)
+        inputs_mean = tf.keras.Input(shape=dim_state, name='critic_input_mean')
+        inputs_stddev = tf.keras.Input(shape=dim_state, name='critic_input_stddev')
+        x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev])
+        x = tf.keras.layers.Dense(128, activation='relu')(x)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         outputs_value = tf.keras.layers.Dense(1, name='value')(x)
-        self.critic = tf.keras.Model(inputs=[inputs_em,inputs_el,inputs_im,inputs_il], outputs=outputs_value)
+        self.critic = tf.keras.Model(inputs=[inputs_mean, inputs_stddev], outputs=outputs_value)
 
         # set up optimizers
         self.optimizer_vae = tf.keras.optimizers.Adam(3e-4)
@@ -187,14 +184,6 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         mean_imgn, logstd_imgn = self.imaginator([mean, stddev, act])
         return tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
 
-    # def compute_logprob(self, state, act=None):
-    #     pi = tfd.Categorical(logits=self.actor(state))
-    #     logp_a = None
-    #     if act is not None:
-    #         logp_a = pi.log_prob(np.squeeze(act))
-
-    #     return pi, logp_a
-
     def compute_value(self, latent_distribution):
         mean = latent_distribution.mean() 
         stddev = latent_distribution.stddev()
@@ -203,27 +192,12 @@ class IntrinsicMotivationAgent(tf.keras.Model):
     def make_decision(self, latent_distribution):
         mean = latent_distribution.mean() 
         stddev = latent_distribution.stddev()
-        pi = tfd.Categorical(logits=self.actor([mean, stddev])
+        pi = tfd.Categorical(logits=self.actor([mean, stddev]))
         act = tf.squeeze(pi.sample())
         logp_a = pi.log_prob(act)
         val = self.compute_value(latent_distribution)
 
         return act.numpy(), val.numpy(), logp_a.numpy()
-
-    # def imagine(self, view):
-    #     """
-    #     Set a goal and compute KL-Divergence between the imagination and the current state
-    #     """
-    #     imagined_mean, imagined_logstd = self.imaginator(image)
-    #     self.imagination = tfd.Normal(imagined_mean, tf.math.exp(imagined_logstd))
-    #     # sample and decode imagination
-    #     self.imagination_sample = self.reparameterize(imagined_mean, imagined_logstd)
-    #     self.decoded_imagination = self.decoder(self.imagination_sample, apply_sigmoid=True) # just decode 1 sample
-    #     # compute kl-divergence between imagined and encoded state
-    #     encoded_mean, encoded_logstd = self.encoder(image)
-    #     self.encoded_image = tfd.Normal(encoded_mean, tf.math.exp(encoded_logstd))
-    #     self.prev_kld = tf.math.reduce_sum(tfd.kl_divergence(self.imagination, self.encoded_image), axis=-2)
-
 
     def compute_intrinsic_reward(self, latent_distribution, imagined_distribution, next_latent_distribution):
         """
@@ -265,24 +239,15 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         return elbo_per_epoch
                 
     def train_policy(self, data, num_iters):
-
-        def normal_entropy(log_std):
-            return .5*tf.math.log(2.*np.pi*np.e*tf.math.exp(log_std)**2)
-
-        views = np.expand_dims(data['state'][:, :, :, 0], -1) # (300,128,128,1)
         # update actor
         for i in range(num_iters):
             logging.debug("Staring actor epoch: {}".format(i+1))
             ep_kl = tf.convert_to_tensor([]) 
             ep_ent = tf.convert_to_tensor([]) 
             with tf.GradientTape() as tape:
-                tape.watch(self.actor.trainable_weights + self.imaginator.trainable_weights)
-                mean, logstd = self.imaginator(views)
-                z = self.reparameterize(mean, logstd)
-                imgns = self.decoder(z)
-                state_rec = np.concatenate((views, imgns), -1)
-                # logp = self.actor(data['state'], data['act']) 
-                pi, logp = self.actor(state_rec, data['act']) 
+                tape.watch(self.actor.trainable_weights)
+                pi = tfd.Categorical(logits=self.actor([data['latent_mean'], data['latent_stddev']]))
+                logp = pi.log_prob(data['act'])
                 ratio = tf.math.exp(logp - data['logp']) # pi/old_pi
                 clip_adv = tf.math.multiply(tf.clip_by_value(ratio, 1-self.clip_ratio, 1+self.clip_ratio), data['adv'])
                 approx_kl = tf.reshape(data['logp'] - logp, shape=[-1])
@@ -324,3 +289,33 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             ))
 
         return loss_pi, loss_v, dict(kl=kl, ent=entropy) 
+
+    def train_imaginator(self, data, num_iters):
+        for i in range(num_iters):
+            logging.debug("Starting imaginator iter: {}".format(i))
+            ep_kl = tf.convert_to_tensor([])
+            with tf.GradientTape() as tape:
+                tape.watch(self.imaginator.trainable_variables)
+                mean_imgn, logstd_imgn = self.imaginator([data['latent_mean'], data['latent_stddev'], data['act']])
+                distr_ltnt = tfd.Normal(loc=data['latent_mean'], scale=data['latent_stddev'])
+                distr_imgn = tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
+                kld = tf.math.reduce_sum(tfd.kl_divergence(distr_imgn, distr_ltnt), axis=-1)
+                loss_i = -tf.math.reduce_mean(kld)
+            # gradient descent critic weights
+            grads_imaginator = tape.gradient(loss_i, self.imaginator.trainable_variables)
+            self.optimizer_imaginator.apply_gradients(zip(grads_critic, self.imaginator.trainable_variables))
+            ep_kl = tf.concat([ep_kl, kld], axis=0)
+            # log epoch
+            kl = tf.math.reduce_mean(ep_kl)
+            logging.info("Epoch :{} \nLoss: {}, \nKL-Divergence: {}".format(
+                i+1,
+                loss_v,
+                kl
+            ))
+            # early cutoff due to large kl-divergence
+            if kl > 10*self.target_kl:
+                logging.warning("Imaginator training early stop at iter {} due to reaching max kl-divergence.".format(i+1))
+                break
+
+        return loss_i, kl 
+
