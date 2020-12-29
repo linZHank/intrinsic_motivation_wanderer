@@ -89,13 +89,11 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
 
 class IntrinsicMotivationAgent(tf.keras.Model):
 
-    def __init__(self, dim_latent, dim_view, act_type, dim_state, dim_act, num_act=None, clip_ratio=0.2, beta=0., target_kl=0.01, **kwargs):
+    def __init__(self, dim_latent, dim_view, dim_act, num_act=None, clip_ratio=0.2, beta=0., target_kl=0.01, **kwargs):
         super(IntrinsicMotivationAgent, self).__init__(name='ppo_ima', **kwargs)
         # parameters
         self.dim_latent = dim_latent
-        self.dim_origin = dim_origin
-        self.act_type = act_type
-        self.dim_state = dim_state
+        self.dim_view = dim_view
         self.dim_act = dim_act
         self.clip_ratio = clip_ratio
         self.beta = beta
@@ -103,10 +101,10 @@ class IntrinsicMotivationAgent(tf.keras.Model):
 
         # construct encoder
         inputs = tf.keras.Input(shape=dim_view, name='image_input')
-        x = tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(inputs_img)
+        x = tf.keras.layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(inputs)
         x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(x)
         x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same', activation='relu')(x)
-        x = tf.keras.layers.Flatten()(features_conv)
+        x = tf.keras.layers.Flatten()(x)
         outputs_mean = tf.keras.layers.Dense(dim_latent, name='encoded_mean')(x)
         outputs_logstd = tf.keras.layers.Dense(dim_latent, name='encoded_logstd')(x)
         self.encoder = tf.keras.Model(inputs=inputs, outputs = [outputs_mean, outputs_logstd])
@@ -132,17 +130,17 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.imaginator = tf.keras.Model(inputs=[inputs_mean, inputs_stddev, inputs_act], outputs=[outputs_mean, outputs_logstd])
 
         # construct actor
-        inputs_mean = tf.keras.Input(shape=dim_state, name='actor_input_mean')
-        inputs_stddev = tf.keras.Input(shape=dim_state, name='actor_input_stddev')
+        inputs_mean = tf.keras.Input(shape=dim_latent, name='actor_input_mean')
+        inputs_stddev = tf.keras.Input(shape=dim_latent, name='actor_input_stddev')
         x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev])
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
-        logits = tf.keras.layers.Dense(num_act, activatio='tanh', name='act_logits')(x)
+        logits = tf.keras.layers.Dense(num_act, activation='tanh', name='act_logits')(x)
         self.actor = tf.keras.Model(inputs=[inputs_mean, inputs_stddev], outputs=logits)
 
         # construct critic
-        inputs_mean = tf.keras.Input(shape=dim_state, name='critic_input_mean')
-        inputs_stddev = tf.keras.Input(shape=dim_state, name='critic_input_stddev')
+        inputs_mean = tf.keras.Input(shape=dim_latent, name='critic_input_mean')
+        inputs_stddev = tf.keras.Input(shape=dim_latent, name='critic_input_stddev')
         x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev])
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
