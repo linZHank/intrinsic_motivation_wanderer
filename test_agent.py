@@ -10,3 +10,22 @@ dim_act = 1
 num_act = 10
 
 agent = IntrinsicMotivationAgent(dim_latent,dim_view,dim_act,num_act)
+
+# encoder
+img = np.random.uniform(0,1,(100,128,128,1))
+enc_m, enc_logs = agent.encoder(img)
+enc_distr = agent.encode(img)
+# decoder
+l= np.random.normal(0,1,(100,8))
+rec_img = agent.decoder(l)
+rec_img_ = agent.decode(l, apply_sigmoid=True)
+# imaginator
+a = tf.convert_to_tensor(np.random.randint(0,10,(100,1)), dtype=tf.float32)
+imn_m, imn_logs = agent.imaginator([enc_distr.mean(), enc_distr.stddev(), a])
+imn_distr = agent.imagine(enc_distr, a)
+# actor
+logits = agent.actor([enc_distr.mean(), enc_distr.stddev()])
+v= agent.critic([enc_distr.mean(), enc_distr.stddev()])
+val = agent.estimate_value(enc_distr)
+act, val_, logp_a = agent.make_decision(enc_distr)
+

@@ -120,9 +120,9 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
 
         # construct imaginator
-        inputs_mean = tf.keras.Input(shape=dim_latent, name='imaginator_input_mean')
-        inputs_stddev = tf.keras.Input(shape=dim_latent, name='imaginator_input_stddev')
-        inputs_act = tf.keras.Input(shape=dim_act, name='imaginator_input_act')
+        inputs_mean = tf.keras.Input(shape=(dim_latent,), name='imaginator_input_mean')
+        inputs_stddev = tf.keras.Input(shape=(dim_latent,), name='imaginator_input_stddev')
+        inputs_act = tf.keras.Input(shape=(dim_act,), name='imaginator_input_act')
         x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev, inputs_act])
         x = tf.keras.layers.Dense(dim_latent*2, activation='relu')(x)
         outputs_mean = tf.keras.layers.Dense(dim_latent, name='imagined_mean')(x)
@@ -182,7 +182,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         mean_imgn, logstd_imgn = self.imaginator([mean, stddev, act])
         return tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
 
-    def compute_value(self, latent_distribution):
+    def estimate_value(self, latent_distribution):
         mean = latent_distribution.mean() 
         stddev = latent_distribution.stddev()
         return tf.squeeze(self.critic([mean, stddev]), axis=-1)
@@ -193,7 +193,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         pi = tfd.Categorical(logits=self.actor([mean, stddev]))
         act = tf.squeeze(pi.sample())
         logp_a = pi.log_prob(act)
-        val = self.compute_value(latent_distribution)
+        val = self.estimate_value(latent_distribution)
 
         return act.numpy(), val.numpy(), logp_a.numpy()
 
