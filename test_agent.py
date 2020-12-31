@@ -37,3 +37,8 @@ nimg = np.random.uniform(0,1,(1,128,128,1))
 next_enc = agent.encode(nimg)
 r = agent.compute_intrinsic_reward(curr_enc, imgn, next_enc)
 
+# train vae
+bsize = 32
+imgs_tensor = tf.convert_to_tensor(imgs, dtype=tf.float32)
+dataset = tf.data.Dataset.from_tensor_slices(imgs_tensor).batch(bsize)
+agent.train_autoencoder(dataset, num_epochs=10)
