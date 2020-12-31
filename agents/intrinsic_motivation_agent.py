@@ -30,8 +30,8 @@ def discount_cumsum(x, discount):
 class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they will be saved in hard disk.
 
     def __init__(self, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
-        self.latent_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.latent_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.state_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.state_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
         self.imagination_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
         self.imagination_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
         self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
@@ -43,10 +43,10 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, latent_mean, latent_stddev, imagination_mean, imagination_stddev, act, rew, val, logp):
+    def store(self, state_mean, state_stddev, imagination_mean, imagination_stddev, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
-        self.latent_mean_buf[self.ptr] = latent_mean
-        self.latent_stddev_buf[self.ptr] = latent_stddev
+        self.state_mean_buf[self.ptr] = state_mean
+        self.state_stddev_buf[self.ptr] = state_stddev
         self.imagination_mean_buf[self.ptr] = imagination_mean
         self.imagination_stddev_buf[self.ptr] = imagination_stddev
         self.act_buf[self.ptr] = act
@@ -75,8 +75,8 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
         data = dict(
-            latent_mean=self.latent_mean_buf, 
-            latent_stddev=self.latent_stddev_buf, 
+            state_mean=self.state_mean_buf, 
+            state_stddev=self.state_stddev_buf, 
             imagination_mean=self.imagination_mean_buf, 
             imagination_stddev=self.imagination_stddev_buf, 
             act=self.act_buf, 
