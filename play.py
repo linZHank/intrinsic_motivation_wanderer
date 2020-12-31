@@ -14,7 +14,7 @@ from drivers.mecanum_driver import MecanumDriver
 from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
 
 # Parameters
-total_steps = 30
+total_steps = 300
 max_ep_len = 10
 dim_latent = 8
 dim_view = (128,128,1)
@@ -36,7 +36,7 @@ view.resize(1,128,128,1)
 state = brain.encode(view) # encoded distribution
 act, val, logp = brain.make_decision(state) 
 wheels.set_action(int(act))
-imagination = brain.imagine(state, act) # imagined distribution
+imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32)) # imagined distribution
 logging.info("\n====Ignition====\n")
 # Preapare for experience collecting
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
@@ -68,7 +68,7 @@ try:
             next_view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
             next_view.resize(1,128,128,1)
             next_state = brain.encode(next_view)
-            rew = brain.compute_intrinsic_reward(state, imagination, next_latent)
+            rew = brain.compute_intrinsic_reward(state, imagination, next_state)
             ep_ret+=rew
             ep_len+=1
             memory.store(np.squeeze(state.mean()), np.squeeze(state.stddev()), np.squeeze(imagination.mean()), np.squeeze(imagination.stddev()), act, rew, val, logp)
@@ -87,7 +87,7 @@ try:
             state = next_state # SUPER CRITICAL!!!
             act, val, logp = brain.make_decision(state) 
             wheels.set_action(int(act))
-            imagination = brain.imagine(state, act)
+            imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32))
             
     # Save valuable items
     with open(os.path.join(save_dir, 'elapsed_time.txt'), 'w') as f:
