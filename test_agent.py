@@ -2,7 +2,10 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 tfd = tfp.distributions
-from agents.intrinsic_motivation_agent import IntrinsicMotivationAgent
+import logging
+logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
+
+from agents.intrinsic_motivation_agent import IntrinsicMotivationAgent, OnPolicyBuffer
 
 dim_latent = 8
 dim_view = (128,128,1)
@@ -42,3 +45,14 @@ bsize = 32
 imgs_tensor = tf.convert_to_tensor(imgs, dtype=tf.float32)
 dataset = tf.data.Dataset.from_tensor_slices(imgs_tensor).batch(bsize)
 agent.train_autoencoder(dataset, num_epochs=10)
+# train actor critic
+rews = np.random.normal(0,2,100)
+buf = OnPolicyBuffer(dim_latent=dim_latent, dim_act=dim_act, size=100)
+for i in range(100):
+    buf.store(np.squeeze(enc_distr.mean()[i]), np.squeeze(enc_distr.stddev()[i]), np.squeeze(imn_distr.mean()[i]), np.squeeze(imn_distr.stddev()[i]), acts_[i], rews[i], val_[i], logp_a[i])
+buf.finish_path(0)    
+data = buf.get()
+loss_pi, loss_v, info = agent.train_policy(data, 100)
+
+
+

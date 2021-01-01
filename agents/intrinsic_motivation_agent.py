@@ -244,7 +244,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             ep_ent = tf.convert_to_tensor([]) 
             with tf.GradientTape() as tape:
                 tape.watch(self.actor.trainable_weights)
-                pi = tfd.Categorical(logits=self.actor([data['latent_mean'], data['latent_stddev']]))
+                pi = tfd.Categorical(logits=self.actor([data['state_mean'], data['state_stddev']]))
                 logp = pi.log_prob(data['act'])
                 ratio = tf.math.exp(logp - data['logp']) # pi/old_pi
                 clip_adv = tf.math.multiply(tf.clip_by_value(ratio, 1-self.clip_ratio, 1+self.clip_ratio), data['adv'])
@@ -253,15 +253,15 @@ class IntrinsicMotivationAgent(tf.keras.Model):
                 obj = tf.math.minimum(tf.math.multiply(ratio, data['adv']), clip_adv) + self.beta*ent
                 loss_pi = -tf.math.reduce_mean(obj)
             # gradient descent actor weights
-            grads_actor = tape.gradient(loss_pi, self.actor.trainable_weights + self.imaginator.trainable_weights) 
-            self.optimizer_actor.apply_gradients(zip(grads_actor, self.actor.trainable_weights + self.imaginator.trainable_weights))
+            grads_actor = tape.gradient(loss_pi, self.actor.trainable_weights) 
+            self.optimizer_actor.apply_gradients(zip(grads_actor, self.actor.trainable_weights))
             # record kl-divergence and entropy
             ep_kl = tf.concat([ep_kl, approx_kl], axis=0)
             ep_ent = tf.concat([ep_ent, ent], axis=0)
             # log epoch
             kl = tf.math.reduce_mean(ep_kl)
             entropy = tf.math.reduce_mean(ep_ent)
-            logging.info("Epoch :{} \nLoss: {} \nEntropy: {} \nKLDivergence: {}".format(
+            logging.info("Iter: {} \nLoss: {} \nEntropy: {} \nKLDivergence: {}".format(
                 i+1,
                 loss_pi,
                 entropy,
@@ -273,15 +273,15 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             #     break
         # update critic
         for i in range(num_iters):
-            logging.debug("Starting critic epoch: {}".format(i))
+            logging.debug("Starting critic iter: {}".format(i))
             with tf.GradientTape() as tape:
                 tape.watch(self.critic.trainable_variables)
-                loss_v = tf.keras.losses.MSE(data['ret'], self.critic(data['state']))
+                loss_v = tf.keras.losses.MSE(data['ret'], tf.squeeze(self.critic([data['state_mean'], data['state_stddev']]), axis=-1))
             # gradient descent critic weights
             grads_critic = tape.gradient(loss_v, self.critic.trainable_variables)
             self.optimizer_critic.apply_gradients(zip(grads_critic, self.critic.trainable_variables))
             # log epoch
-            logging.info("Epoch :{} \nLoss: {}".format(
+            logging.info("Iter: {} \nLoss: {}".format(
                 i+1,
                 loss_v
             ))
