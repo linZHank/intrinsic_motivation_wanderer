@@ -294,26 +294,26 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             ep_kl = tf.convert_to_tensor([])
             with tf.GradientTape() as tape:
                 tape.watch(self.imaginator.trainable_variables)
-                mean_imgn, logstd_imgn = self.imaginator([data['latent_mean'], data['latent_stddev'], data['act']])
-                distr_ltnt = tfd.Normal(loc=data['latent_mean'], scale=data['latent_stddev'])
-                distr_imgn = tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
-                kld = tf.math.reduce_sum(tfd.kl_divergence(distr_imgn, distr_ltnt), axis=-1)
+                mean_imgn, logstd_imgn = self.imaginator([data['state_mean'], data['state_stddev'], data['act']])
+                distr_state = tfd.Normal(loc=data['state_mean'], scale=data['state_stddev'])
+                distr_imagination = tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
+                kld = tf.math.reduce_sum(tfd.kl_divergence(distr_imagination, distr_state), axis=-1)
                 loss_i = -tf.math.reduce_mean(kld)
             # gradient descent critic weights
             grads_imaginator = tape.gradient(loss_i, self.imaginator.trainable_variables)
-            self.optimizer_imaginator.apply_gradients(zip(grads_critic, self.imaginator.trainable_variables))
+            self.optimizer_imaginator.apply_gradients(zip(grads_imaginator, self.imaginator.trainable_variables))
             ep_kl = tf.concat([ep_kl, kld], axis=0)
             # log epoch
             kl = tf.math.reduce_mean(ep_kl)
-            logging.info("Epoch :{} \nLoss: {}, \nKL-Divergence: {}".format(
+            logging.info("Iter: {} \nLoss: {}, \nKL-Divergence: {}".format(
                 i+1,
-                loss_v,
+                loss_i,
                 kl
             ))
             # early cutoff due to large kl-divergence
-            if kl > 10*self.target_kl:
-                logging.warning("Imaginator training early stop at iter {} due to reaching max kl-divergence.".format(i+1))
-                break
+            # if kl > 10*self.target_kl:
+            #     logging.warning("Imaginator training early stop at iter {} due to reaching max kl-divergence.".format(i+1))
+            #     break
 
         return loss_i, kl 
 

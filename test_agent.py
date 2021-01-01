@@ -53,6 +53,8 @@ for i in range(100):
 buf.finish_path(0)    
 data = buf.get()
 loss_pi, loss_v, info = agent.train_policy(data, 100)
+# train imaginator
+agent.train_imaginator(data, 10)
 
 
 
