@@ -12,6 +12,7 @@ logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
 from drivers.mecanum_driver import MecanumDriver
 from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
+import tensorflow as tf
 
 # Parameters
 total_steps = 300
@@ -20,6 +21,13 @@ dim_latent = 8
 dim_view = (128,128,1)
 dim_act = 1
 num_act = 10
+seed = 'belauensis'
+load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-03-17-01') # typically use the last saved models
+encoder_path = os.path.join(load_dir, 'encoder')
+decoder_path = os.path.join(load_dir, 'decoder')
+imaginator_path = os.path.join(load_dir, 'imaginator')
+actor_path = os.path.join(load_dir, 'actor')
+critic_path = os.path.join(load_dir, 'critic')
 # Get mecanum driver ready
 wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 # Get camera ready
@@ -28,6 +36,11 @@ eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)
 eye.get(cv2.CAP_PROP_FPS)
 # Get agent ready
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
+brain.encoder = tf.keras.models.load_model(encoder_path)
+brain.decoder = tf.keras.models.load_model(decoder_path)
+brain.imaginator = tf.keras.models.load_model(imaginator_path)
+brain.actor = tf.keras.models.load_model(actor_path)
+brain.critic = tf.keras.models.load_model(critic_path)
 memory = OnPolicyBuffer(dim_latent=dim_latent, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
 # Generate first imagination and action
 ret, frame = eye.read() # obs = env.reset()
