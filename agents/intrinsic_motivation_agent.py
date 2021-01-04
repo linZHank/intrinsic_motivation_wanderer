@@ -297,29 +297,32 @@ class IntrinsicMotivationAgent(tf.keras.Model):
     def train_imaginator(self, data, num_iters):
         for i in range(num_iters):
             logging.debug("Starting imaginator iter: {}".format(i))
-            ep_kl = tf.convert_to_tensor([])
+            ep_kldc = tf.convert_to_tensor([])
+            ep_kldn = tf.convert_to_tensor([])
             with tf.GradientTape() as tape:
                 tape.watch(self.imaginator.trainable_variables)
                 mean_imgn, logstd_imgn = self.imaginator([data['state_mean'], data['state_stddev'], data['act']])
                 distr_state = tfd.Normal(loc=data['state_mean'], scale=data['state_stddev'])
+                distr_nextstate = tfd.Normal(loc=data['nextstate_mean'], scale=data['nextstate_stddev'])
                 distr_imagination = tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
-                kld = tf.math.reduce_sum(tfd.kl_divergence(distr_imagination, distr_state), axis=-1)
-                loss_i = -tf.math.reduce_mean(kld)
+                kld_curr = tf.math.reduce_sum(tfd.kl_divergence(distr_imagination, distr_state), axis=-1)
+                kld_next = tf.math.reduce_sum(tfd.kl_divergence(distr_imagination, distr_nextstate), axis=-1)
+                loss_i = -tf.math.reduce_mean(kld_curr - kld_next) # maximize intrinsic reward
             # gradient descent critic weights
             grads_imaginator = tape.gradient(loss_i, self.imaginator.trainable_variables)
             self.optimizer_imaginator.apply_gradients(zip(grads_imaginator, self.imaginator.trainable_variables))
-            ep_kl = tf.concat([ep_kl, kld], axis=0)
+            ep_kldc = tf.concat([ep_klc, kld_curr], axis=0)
+            ep_kldn = tf.concat([ep_kln, kld_next], axis=0)
             # log epoch
-            kl = tf.math.reduce_mean(ep_kl)
-            logging.info("Iter: {} \nLoss: {}, \nKL-Divergence: {}".format(
+            kldc = tf.math.reduce_mean(ep_kldc)
+            kldn = tf.math.reduce_mean(ep_kldn)
+            logging.info("Iter: {} \nLoss: {}, \nCurrentKLD: {}, \nNextKLD: {}".format(
                 i+1,
                 loss_i,
-                kl
+                kldc,
+                kldn
             ))
             # early cutoff due to large kl-divergence
-            # if kl > 10*self.target_kl:
-            #     logging.warning("Imaginator training early stop at iter {} due to reaching max kl-divergence.".format(i+1))
-            #     break
 
         return loss_i, kl 
 
