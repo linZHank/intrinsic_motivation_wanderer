@@ -85,7 +85,17 @@ try:
             rew = brain.compute_intrinsic_reward(state, imagination, next_state)
             ep_ret+=rew
             ep_len+=1
-            memory.store(np.squeeze(state.mean()), np.squeeze(state.stddev()), np.squeeze(imagination.mean()), np.squeeze(imagination.stddev()), act, rew, val, logp)
+            memory.store(
+                    np.squeeze(state.mean()), 
+                    np.squeeze(state.stddev()), 
+                    np.squeeze(next_state.mean()), 
+                    np.squeeze(next_state.stddev()), 
+                    np.squeeze(imagination.mean()), 
+                    np.squeeze(imagination.stddev()), 
+                    act, 
+                    rew, 
+                    val, 
+                    logp)
             step_counter+=1
             stepwise_frames.append(frame_counter)
             logging.info("\nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, (state.mean(),state.stddev()), (imagination.mean(), imagination.stddev()), act, (next_state.mean(), next_state.stddev()), val, logp, rew, ep_ret, ep_len))
