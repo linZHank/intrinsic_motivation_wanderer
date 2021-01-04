@@ -2,6 +2,7 @@
 """
 Deploy this script on the robot. The robot will play and collect experience data according to its imagination.
 """
+import sys
 import os
 import time
 import numpy as np
