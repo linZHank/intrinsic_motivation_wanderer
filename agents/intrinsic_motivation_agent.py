@@ -116,8 +116,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.encoder = tf.keras.Model(inputs=inputs, outputs = [outputs_mean, outputs_logstd])
 
         # construct decoder
-        inputs_latent = tf.keras.Input(shape=(dim_latent,), name='latent_feature')
-        x = tf.keras.layers.Dense(units=16*16*32, activation='relu')(inputs_latent) # only valid for reconstructing (128,128,1) image; TODO: generalize to any shape
+        inputs_latent = tf.keras.Input(shape=(dim_latent,), name='latent_input')
+        x = tf.keras.layers.Dense(units=16*16*32, activation='relu')(inputs_latent) 
         x = tf.keras.layers.Reshape(target_shape=(16, 16, 32))(x)
         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(x)
         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same', activation='relu')(x)

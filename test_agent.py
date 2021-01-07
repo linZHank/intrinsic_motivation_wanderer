@@ -52,7 +52,7 @@ for i in range(100):
     buf.store(np.squeeze(enc_distr.mean()[i]), np.squeeze(enc_distr.stddev()[i]), np.squeeze(imn_distr.mean()[i]), np.squeeze(imn_distr.stddev()[i]), acts_[i], rews[i], val_[i], logp_a[i])
 buf.finish_path(0)    
 data = buf.get()
-loss_pi, loss_v, info = agent.train_policy(data, 100)
+loss_pi, loss_v, info = agent.train_policy(data, 10)
 # train imaginator
 agent.train_imaginator(data, 10)
 

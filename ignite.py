@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
-Deploy this script on the robot. The robot will play and collect experience data according to its imagination.
+Initialize Intrinsic Motivation Agent (IMA)
 """
 import sys
 import os
@@ -16,7 +16,7 @@ from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivatio
 
 # Parameters
 max_ep_len = 10
-dim_latent = 8
+dim_latent = 16
 dim_view = (128,128,1)
 dim_act = 1
 num_act = 10
