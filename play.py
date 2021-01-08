@@ -18,17 +18,11 @@ import tensorflow as tf
 # Parameters
 total_steps = 300
 max_ep_len = 10
-dim_latent = 8
+dim_latent = 16
 dim_view = (128,128,1)
 dim_act = 1
 num_act = 10
-seed = 'belauensis'
-load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-03-19-22') # typically use the last saved models
-encoder_path = os.path.join(load_dir, 'encoder')
-decoder_path = os.path.join(load_dir, 'decoder')
-imaginator_path = os.path.join(load_dir, 'imaginator')
-actor_path = os.path.join(load_dir, 'actor')
-critic_path = os.path.join(load_dir, 'critic')
+
 # Get mecanum driver ready
 wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 # Get camera ready
@@ -37,11 +31,13 @@ eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)
 eye.get(cv2.CAP_PROP_FPS)
 # Get agent ready
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
-brain.encoder = tf.keras.models.load_model(encoder_path)
-brain.decoder = tf.keras.models.load_model(decoder_path)
-brain.imaginator = tf.keras.models.load_model(imaginator_path)
-brain.actor = tf.keras.models.load_model(actor_path)
-brain.critic = tf.keras.models.load_model(critic_path)
+seed = 'belauensis'
+load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-08-15-22') # typically use the last saved models
+brain.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
+brain.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
+brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
+brain.actor = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
+brain.critic = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 memory = OnPolicyBuffer(dim_latent=dim_latent, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
 # Generate first imagination and action
 ret, frame = eye.read() # obs = env.reset()
@@ -70,6 +66,7 @@ stepwise_frames = []
 time_elapse = 0
 prev_time_elapse = 0
 start_time = time.time()
+
 # Main loop
 try:
     while step_counter < total_steps:
@@ -86,16 +83,17 @@ try:
             ep_ret+=rew
             ep_len+=1
             memory.store(
-                    np.squeeze(state.mean()), 
-                    np.squeeze(state.stddev()), 
-                    np.squeeze(next_state.mean()), 
-                    np.squeeze(next_state.stddev()), 
-                    np.squeeze(imagination.mean()), 
-                    np.squeeze(imagination.stddev()), 
-                    act, 
-                    rew, 
-                    val, 
-                    logp)
+                np.squeeze(state.mean()), 
+                np.squeeze(state.stddev()), 
+                np.squeeze(next_state.mean()), 
+                np.squeeze(next_state.stddev()), 
+                np.squeeze(imagination.mean()), 
+                np.squeeze(imagination.stddev()), 
+                act, 
+                rew, 
+                val, 
+                logp
+            )
             step_counter+=1
             stepwise_frames.append(frame_counter)
             logging.info("\nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, (state.mean(),state.stddev()), (imagination.mean(), imagination.stddev()), act, (next_state.mean(), next_state.stddev()), val, logp, rew, ep_ret, ep_len))

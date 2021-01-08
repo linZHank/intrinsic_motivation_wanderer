@@ -45,12 +45,12 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, state_mean, state_stddev, imagination_mean, imagination_stddev, act, rew, val, logp):
+    def store(self, state_mean, state_stddev, nextstate_mean, nextstate_stddev, imagination_mean, imagination_stddev, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
         self.state_mean_buf[self.ptr] = state_mean
         self.state_stddev_buf[self.ptr] = state_stddev
-        self.nextstate_mean_buf[self.ptr] = state_mean
-        self.nextstate_stddev_buf[self.ptr] = state_stddev
+        self.nextstate_mean_buf[self.ptr] = nextstate_mean
+        self.nextstate_stddev_buf[self.ptr] = nextstate_stddev
         self.imagination_mean_buf[self.ptr] = imagination_mean
         self.imagination_stddev_buf[self.ptr] = imagination_stddev
         self.act_buf[self.ptr] = act
