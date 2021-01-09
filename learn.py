@@ -2,6 +2,7 @@
 """
 Use this script on the computing machine. The robot learns through training.
 """
+import sys
 import os
 import time
 import numpy as np
@@ -21,10 +22,12 @@ dim_view = (128,128,1)
 dim_act = 1
 num_act = 10
 seed = 'belauensis'
+num_epochs = 100
+batch_size = 32
 
 # Load agent
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
-load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-08-')
+load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-08-19-31')
 brain.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
 brain.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
 brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
@@ -32,26 +35,21 @@ brain.actor = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
 brain.critic = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 
 # Load data
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-03-19-32/'
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-08-19-45/'
 dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
     data_dir,
     color_mode='grayscale',
-    validation_split=0.1,
-    subset="training",
-    seed=123,
-    image_size=(height, width),
+    image_size=(128, 128),
     batch_size=batch_size
 )
-dataset_views = dataset.map(lambda x, y: x/255.)
+dataset_views = dataset_views.map(lambda x, y: x/255.)
 replay_data = np.load(data_dir+'replay_data.npy', allow_pickle=True).item()
 
 # train autoencoder
-num_epochs = 100
-batch_size = 32
-brain.train_autoencoder(dataset_views, num_epochs=num_epochs)
+brain.train_autoencoder(dataset_views, num_epochs=int(num_epochs/5))
 
 # train imaginator
-agent.train_imaginator(replay_data, num_epochs=num_epochs)
+brain.train_imaginator(replay_data, num_epochs=num_epochs)
 
 # Train policy
 loss_pi, loss_v, loss_info = brain.train_policy(replay_data, num_epochs=num_epochs)

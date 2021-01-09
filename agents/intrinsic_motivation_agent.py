@@ -259,8 +259,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             # gradient descent critic weights
             grads_imaginator = tape.gradient(loss_i, self.imaginator.trainable_variables)
             self.optimizer_imaginator.apply_gradients(zip(grads_imaginator, self.imaginator.trainable_variables))
-            ep_kldc = tf.concat([ep_klc, kld_curr], axis=0)
-            ep_kldn = tf.concat([ep_kln, kld_next], axis=0)
+            ep_kldc = tf.concat([ep_kldc, kld_curr], axis=0)
+            ep_kldn = tf.concat([ep_kldn, kld_next], axis=0)
             # log epoch
             kldc = tf.math.reduce_mean(ep_kldc)
             kldn = tf.math.reduce_mean(ep_kldn)
@@ -272,7 +272,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             ))
             # early cutoff due to large kl-divergence
 
-        return loss_i, kl 
+        return loss_i, kldc, kldn 
 
     def train_policy(self, data, num_epochs):
         # update actor
