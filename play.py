@@ -43,10 +43,11 @@ memory = OnPolicyBuffer(dim_latent=dim_latent, dim_act=dim_act, size=total_steps
 ret, frame = eye.read() # obs = env.reset()
 view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
 view.resize(1,128,128,1)
-state = brain.encode(view) # encoded distribution
+latent_distribution = brain.encode(view) # encoded distribution
+state = latent_distribution.sample() # brain.reparameterize(latent_distribution.mean(), latent_distribution.stddev())
 act, val, logp = brain.make_decision(state) 
 wheels.set_action(int(act))
-imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32)) # imagined distribution
+imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32)) # imagined latent state
 logging.info("\n====Ignition====\n")
 # Preapare for experience collecting
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
@@ -78,17 +79,19 @@ try:
         if int(time_elapse)-int(prev_time_elapse): # take an action every sec
             next_view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
             next_view.resize(1,128,128,1)
-            next_state = brain.encode(next_view)
-            rew = brain.compute_intrinsic_reward(state, imagination, next_state)
+            next_latent_distribution = brain.encode(next_view)
+            next_state = next_latent_distribution.sample() # brain.reparameterize(next_latent_distribution.mean(), next_latent_distribution.stddev()) 
+            rew = brain.compute_intrinsic_reward(imagination, next_latent_distribution)
             ep_ret+=rew
             ep_len+=1
             memory.store(
-                np.squeeze(state.mean()), 
-                np.squeeze(state.stddev()), 
-                np.squeeze(next_state.mean()), 
-                np.squeeze(next_state.stddev()), 
-                np.squeeze(imagination.mean()), 
-                np.squeeze(imagination.stddev()), 
+                np.squeeze(latent_distribution.mean()), 
+                np.squeeze(latent_distribution.stddev()), 
+                np.squeeze(next_latent_distribution.mean()), 
+                np.squeeze(next_latent_distribution.stddev()), 
+                np.squeeze(state), 
+                np.squeeze(imagination), 
+                np.squeeze(next_state), 
                 act, 
                 rew, 
                 val, 
@@ -96,7 +99,7 @@ try:
             )
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            logging.info("\nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, (state.mean(),state.stddev()), (imagination.mean(), imagination.stddev()), act, (next_state.mean(), next_state.stddev()), val, logp, rew, ep_ret, ep_len))
+            logging.info("\nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, state, imagination, act, next_state, val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
                 _, val, _ = brain.make_decision(state)

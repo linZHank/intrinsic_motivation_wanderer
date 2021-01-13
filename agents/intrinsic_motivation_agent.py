@@ -126,38 +126,32 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.decoder = tf.keras.Model(inputs=inputs_latent, outputs=outputs_img)
 
         # construct imaginator
-        inputs_mean = tf.keras.Input(shape=(dim_latent,), name='imaginator_input_mean')
-        inputs_stddev = tf.keras.Input(shape=(dim_latent,), name='imaginator_input_stddev')
+        inputs_state = tf.keras.Input(shape=(dim_latent,), name='imaginator_input_state')
         inputs_act = tf.keras.Input(shape=(dim_act,), name='imaginator_input_act')
-        x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev, inputs_act])
+        x = tf.keras.layers.concatenate([inputs_latent, inputs_act])
         x = tf.keras.layers.Dense(dim_latent*2, activation='relu')(x)
-        outputs_mean = tf.keras.layers.Dense(dim_latent, name='imagined_mean')(x)
-        outputs_logstd = tf.keras.layers.Dense(dim_latent, name='imagined_logstd')(x)
-        self.imaginator = tf.keras.Model(inputs=[inputs_mean, inputs_stddev, inputs_act], outputs=[outputs_mean, outputs_logstd])
+        outputs_nextstate = tf.keras.layers.Dense(dim_latent, name='imagined_mean')(x)
+        self.imaginator = tf.keras.Model(inputs=[inputs_state, inputs_act], outputs=outputs_nextstate)
 
         # construct actor
-        inputs_mean = tf.keras.Input(shape=dim_latent, name='actor_input_mean')
-        inputs_stddev = tf.keras.Input(shape=dim_latent, name='actor_input_stddev')
-        x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev])
+        inputs_state = tf.keras.Input(shape=dim_latent, name='actor_input')
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         logits = tf.keras.layers.Dense(num_act, activation='tanh', name='act_logits')(x)
-        self.actor = tf.keras.Model(inputs=[inputs_mean, inputs_stddev], outputs=logits)
+        self.actor = tf.keras.Model(inputs=inputs_state, outputs=logits)
 
         # construct critic
-        inputs_mean = tf.keras.Input(shape=dim_latent, name='critic_input_mean')
-        inputs_stddev = tf.keras.Input(shape=dim_latent, name='critic_input_stddev')
-        x = tf.keras.layers.concatenate([inputs_mean, inputs_stddev])
+        inputs_state = tf.keras.Input(shape=dim_latent, name='critic_input')
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         outputs_value = tf.keras.layers.Dense(1, name='value')(x)
-        self.critic = tf.keras.Model(inputs=[inputs_mean, inputs_stddev], outputs=outputs_value)
+        self.critic = tf.keras.Model(inputs=inputs_state, outputs=outputs_value)
 
         # set up optimizers
-        self.optimizer_vae = tf.keras.optimizers.Adam(3e-4)
+        self.optimizer_vae = tf.keras.optimizers.Adam(1e-4)
         self.optimizer_actor = tf.keras.optimizers.Adam(1e-4)
-        self.optimizer_critic = tf.keras.optimizers.Adam(3e-4)
-        self.optimizer_imaginator = tf.keras.optimizers.Adam(3e-4)
+        self.optimizer_critic = tf.keras.optimizers.Adam(1e-4)
+        self.optimizer_imaginator = tf.keras.optimizers.Adam(1e-4)
 
     @tf.function
     def sample(self, eps=None):
@@ -166,9 +160,9 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         return self.decoder(eps, apply_sigmoid=True)
 
     @tf.function
-    def reparameterize(self, mean, logstd):
+    def reparameterize(self, mean, std):
         eps = tf.random.normal(shape=mean.shape)
-        return eps*tf.math.exp(logstd) + mean
+        return mean + eps*std 
 
     def encode(self, img):
         mean, logstd = self.encoder(img)
@@ -182,36 +176,30 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             return probs
         return logits
 
-    def imagine(self, latent_distribution, act):
-        mean = latent_distribution.mean() 
-        stddev = latent_distribution.stddev()
-        mean_imgn, logstd_imgn = self.imaginator([mean, stddev, act])
-        return tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
+    def imagine(self, latent_state, act):
+        imagined_state = self.imaginator([latent_state, act])
+        return imagined_state
 
     def estimate_value(self, latent_distribution):
         mean = latent_distribution.mean() 
         stddev = latent_distribution.stddev()
         return tf.squeeze(self.critic([mean, stddev]), axis=-1)
 
-    def make_decision(self, latent_distribution):
-        mean = latent_distribution.mean() 
-        stddev = latent_distribution.stddev()
-        pi = tfd.Categorical(logits=self.actor([mean, stddev]))
+    def make_decision(self, latent_state):
+        pi = tfd.Categorical(logits=self.actor(latent_state))
         act = tf.squeeze(pi.sample())
         logp_a = pi.log_prob(act)
-        val = self.estimate_value(latent_distribution)
+        val = self.estimate_value(latent_state)
 
         return act.numpy(), val.numpy(), logp_a.numpy()
 
-    def compute_intrinsic_reward(self, latent_distribution, imagined_distribution, next_latent_distribution):
+    def compute_intrinsic_reward(self, imagined_state, next_latent_distribution):
         """
-        kld_t - kld_{t+1}
+        Less likely state results in larger reward, which simulates curiosity
         """
-        kld_curr = tf.math.reduce_sum(tfd.kl_divergence(imagined_distribution, latent_distribution), axis=-1)
-        kld_next = tf.math.reduce_sum(tfd.kl_divergence(imagined_distribution, next_latent_distribution), axis=-1)
-        reward = kld_curr - kld_next
+        reward = -next_latent_distribution.logprob(imagined_state)
 
-        return np.squeeze(reward)
+        return np.squeeze(np.clip(reward, 0, 10))
         
     def train_autoencoder(self, dataset, num_epochs):
 
