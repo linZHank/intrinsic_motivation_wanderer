@@ -234,34 +234,17 @@ class IntrinsicMotivationAgent(tf.keras.Model):
     def train_imaginator(self, data, num_epochs):
         for i in range(num_epochs):
             logging.debug("Starting imaginator iter: {}".format(i))
-            ep_kldc = tf.convert_to_tensor([])
-            ep_kldn = tf.convert_to_tensor([])
             with tf.GradientTape() as tape:
                 tape.watch(self.imaginator.trainable_variables)
-                mean_imgn, logstd_imgn = self.imaginator([data['state_mean'], data['state_stddev'], data['act']])
-                distr_state = tfd.Normal(loc=data['state_mean'], scale=data['state_stddev'])
-                distr_nextstate = tfd.Normal(loc=data['nextstate_mean'], scale=data['nextstate_stddev'])
-                distr_imagination = tfd.Normal(loc=mean_imgn, scale=tf.math.exp(logstd_imgn))
-                kld_curr = tf.math.reduce_sum(tfd.kl_divergence(distr_imagination, distr_state), axis=-1)
-                kld_next = tf.math.reduce_sum(tfd.kl_divergence(distr_imagination, distr_nextstate), axis=-1)
-                loss_i = -tf.math.reduce_mean(kld_curr - kld_next) # maximize intrinsic reward
+                pred_nstate = self.imaginator([data['state'], data['act']])
+                loss_i = tf.keras.losses.MSE(data['nstate'], pred_nstate)
             # gradient descent critic weights
             grads_imaginator = tape.gradient(loss_i, self.imaginator.trainable_variables)
             self.optimizer_imaginator.apply_gradients(zip(grads_imaginator, self.imaginator.trainable_variables))
-            ep_kldc = tf.concat([ep_kldc, kld_curr], axis=0)
-            ep_kldn = tf.concat([ep_kldn, kld_next], axis=0)
             # log epoch
-            kldc = tf.math.reduce_mean(ep_kldc)
-            kldn = tf.math.reduce_mean(ep_kldn)
-            logging.info("Iter: {} \nLoss: {}, \nCurrentKLD: {}, \nNextKLD: {}".format(
-                i+1,
-                loss_i,
-                kldc,
-                kldn
-            ))
-            # early cutoff due to large kl-divergence
+            logging.info("Iter: {} \nLoss: {}".format(i+1, loss_i))
 
-        return loss_i, kldc, kldn 
+        return loss_i 
 
     def train_policy(self, data, num_epochs):
         # update actor
@@ -271,7 +254,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             ep_ent = tf.convert_to_tensor([]) 
             with tf.GradientTape() as tape:
                 tape.watch(self.actor.trainable_weights)
-                pi = tfd.Categorical(logits=self.actor([data['state_mean'], data['state_stddev']]))
+                pi = tfd.Categorical(logits=self.actor(data['state']))
                 logp = pi.log_prob(data['act'])
                 ratio = tf.math.exp(logp - data['logp']) # pi/old_pi
                 clip_adv = tf.math.multiply(tf.clip_by_value(ratio, 1-self.clip_ratio, 1+self.clip_ratio), data['adv'])
@@ -303,7 +286,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             logging.debug("Starting critic iter: {}".format(i))
             with tf.GradientTape() as tape:
                 tape.watch(self.critic.trainable_variables)
-                loss_v = tf.keras.losses.MSE(data['ret'], tf.squeeze(self.critic([data['state_mean'], data['state_stddev']]), axis=-1))
+                loss_v = tf.keras.losses.MSE(data['ret'], tf.squeeze(self.critic(data['state']), axis=-1))
             # gradient descent critic weights
             grads_critic = tape.gradient(loss_v, self.critic.trainable_variables)
             self.optimizer_critic.apply_gradients(zip(grads_critic, self.critic.trainable_variables))
