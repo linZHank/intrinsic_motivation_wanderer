@@ -128,21 +128,21 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         # construct imaginator
         inputs_state = tf.keras.Input(shape=(dim_latent,), name='imaginator_input_state')
         inputs_act = tf.keras.Input(shape=(dim_act,), name='imaginator_input_act')
-        x = tf.keras.layers.concatenate([inputs_latent, inputs_act])
+        x = tf.keras.layers.concatenate([inputs_state, inputs_act])
         x = tf.keras.layers.Dense(dim_latent*2, activation='relu')(x)
         outputs_nextstate = tf.keras.layers.Dense(dim_latent, name='imagined_mean')(x)
         self.imaginator = tf.keras.Model(inputs=[inputs_state, inputs_act], outputs=outputs_nextstate)
 
         # construct actor
         inputs_state = tf.keras.Input(shape=dim_latent, name='actor_input')
-        x = tf.keras.layers.Dense(128, activation='relu')(x)
+        x = tf.keras.layers.Dense(128, activation='relu')(inputs_state)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         logits = tf.keras.layers.Dense(num_act, activation='tanh', name='act_logits')(x)
         self.actor = tf.keras.Model(inputs=inputs_state, outputs=logits)
 
         # construct critic
         inputs_state = tf.keras.Input(shape=dim_latent, name='critic_input')
-        x = tf.keras.layers.Dense(128, activation='relu')(x)
+        x = tf.keras.layers.Dense(128, activation='relu')(inputs_state)
         x = tf.keras.layers.Dense(128, activation='relu')(x)
         outputs_value = tf.keras.layers.Dense(1, name='value')(x)
         self.critic = tf.keras.Model(inputs=inputs_state, outputs=outputs_value)
@@ -180,10 +180,8 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         imagined_state = self.imaginator([latent_state, act])
         return imagined_state
 
-    def estimate_value(self, latent_distribution):
-        mean = latent_distribution.mean() 
-        stddev = latent_distribution.stddev()
-        return tf.squeeze(self.critic([mean, stddev]), axis=-1)
+    def estimate_value(self, latent_state):
+        return tf.squeeze(self.critic(latent_state), axis=-1)
 
     def make_decision(self, latent_state):
         pi = tfd.Categorical(logits=self.actor(latent_state))
@@ -197,7 +195,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         """
         Less likely state results in larger reward, which simulates curiosity
         """
-        reward = -next_latent_distribution.logprob(imagined_state)
+        reward = -tf.math.reduce_mean(next_latent_distribution.log_prob(imagined_state), axis=-1)
 
         return np.squeeze(np.clip(reward, 0, 10))
         
