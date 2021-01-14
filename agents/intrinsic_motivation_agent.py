@@ -30,12 +30,13 @@ def discount_cumsum(x, discount):
 class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they will be saved in hard disk.
 
     def __init__(self, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
-        self.state_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.state_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.nextstate_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.nextstate_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.imagination_mean_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.imagination_stddev_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.latmean_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.latstd_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.nlatmean_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.nlatstd_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.state_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.nstate_buf = np.zeros((size, dim_latent), dtype=np.float32)
+        self.imn_buf = np.zeros((size, dim_latent), dtype=np.float32)
         self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
@@ -45,14 +46,15 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, state_mean, state_stddev, nextstate_mean, nextstate_stddev, imagination_mean, imagination_stddev, act, rew, val, logp):
+    def store(self, latent_mean, latent_stddev, nextlatent_mean, nextlatent_stddev, state, nextstate, imagination, act, rew, val, logp):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
-        self.state_mean_buf[self.ptr] = state_mean
-        self.state_stddev_buf[self.ptr] = state_stddev
-        self.nextstate_mean_buf[self.ptr] = nextstate_mean
-        self.nextstate_stddev_buf[self.ptr] = nextstate_stddev
-        self.imagination_mean_buf[self.ptr] = imagination_mean
-        self.imagination_stddev_buf[self.ptr] = imagination_stddev
+        self.latmean_buf[self.ptr] = latent_mean
+        self.latstd_buf[self.ptr] = latent_stddev
+        self.nlatmean_buf[self.ptr] = nextlatent_mean
+        self.nlatstd_buf[self.ptr] = nextlatent_stddev
+        self.state_buf[self.ptr] = state
+        self.nstate_buf[self.ptr] = nextstate
+        self.imn_buf[self.ptr] = imagination
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
@@ -79,12 +81,13 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
         data = dict(
-            state_mean=self.state_mean_buf, 
-            state_stddev=self.state_stddev_buf, 
-            nextstate_mean=self.nextstate_mean_buf, 
-            nextstate_stddev=self.nextstate_stddev_buf, 
-            imagination_mean=self.imagination_mean_buf, 
-            imagination_stddev=self.imagination_stddev_buf, 
+            latmean=self.latmean_buf, 
+            latstd=self.latstd_buf, 
+            nlatmean=self.nlatmean_buf, 
+            nlatstd=self.nlatstd_buf, 
+            state=self.state_buf, 
+            nstate=self.nstate_buf, 
+            imn=self.imn_buf, 
             act=self.act_buf, 
             ret=self.ret_buf, 
             adv=self.adv_buf, 
