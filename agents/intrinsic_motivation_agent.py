@@ -232,17 +232,18 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         return elbo_per_epoch
                 
     def train_imaginator(self, data, num_epochs):
+        mse = tf.keras.losses.MeanSquaredError()
         for i in range(num_epochs):
             logging.debug("Starting imaginator iter: {}".format(i))
             with tf.GradientTape() as tape:
                 tape.watch(self.imaginator.trainable_variables)
                 pred_nstate = self.imaginator([data['state'], data['act']])
-                loss_i = tf.keras.losses.MSE(data['nstate'], pred_nstate)
+                loss_i = mse(data['nstate'], pred_nstate)
             # gradient descent critic weights
             grads_imaginator = tape.gradient(loss_i, self.imaginator.trainable_variables)
             self.optimizer_imaginator.apply_gradients(zip(grads_imaginator, self.imaginator.trainable_variables))
             # log epoch
-            logging.info("Iter: {} \nLoss: {}".format(i+1, loss_i))
+            logging.info("Epoch: {} \nImaginatorLoss: {}".format(i+1, loss_i))
 
         return loss_i 
 
@@ -271,7 +272,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             # log epoch
             kl = tf.math.reduce_mean(ep_kl)
             entropy = tf.math.reduce_mean(ep_ent)
-            logging.info("Iter: {} \nLoss: {} \nEntropy: {} \nKLDivergence: {}".format(
+            logging.info("Epoch: {} \nActorLoss: {} \nEntropy: {} \nKLDivergence: {}".format(
                 i+1,
                 loss_pi,
                 entropy,
@@ -282,16 +283,17 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             #     logging.warning("Early stopping at epoch {} due to reaching max kl-divergence.".format(epch+1))
             #     break
         # update critic
+        mse = tf.keras.losses.MeanSquaredError()
         for i in range(num_epochs):
-            logging.debug("Starting critic iter: {}".format(i))
+            logging.debug("Starting critic epoch: {}".format(i))
             with tf.GradientTape() as tape:
                 tape.watch(self.critic.trainable_variables)
-                loss_v = tf.keras.losses.MSE(data['ret'], tf.squeeze(self.critic(data['state']), axis=-1))
+                loss_v = mse(data['ret'], tf.squeeze(self.critic(data['state']), axis=-1))
             # gradient descent critic weights
             grads_critic = tape.gradient(loss_v, self.critic.trainable_variables)
             self.optimizer_critic.apply_gradients(zip(grads_critic, self.critic.trainable_variables))
             # log epoch
-            logging.info("Iter: {} \nLoss: {}".format(
+            logging.info("Epoch: {} \nCriticLoss: {}".format(
                 i+1,
                 loss_v
             ))
