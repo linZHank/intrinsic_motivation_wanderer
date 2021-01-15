@@ -17,7 +17,6 @@ import tensorflow as tf
 
 # Parameters
 total_steps = 300
-max_ep_len = 10
 dim_latent = 16
 dim_view = (128,128,1)
 dim_act = 1
@@ -58,11 +57,12 @@ if not os.path.exists(views_dir):
     except OSError as e:
         if e.errno != errno.EEXIST:
             raise
+max_ep_len = 10
 ep_ret, ep_len = 0, 0
 frame_counter = 0
 episode_counter = 0
 step_counter = 0
-episodic_returns, sedimentary_returns = [], []
+episodic_returns = []
 stepwise_frames = []
 time_elapse = 0
 prev_time_elapse = 0
@@ -99,15 +99,15 @@ try:
             )
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            logging.info("\nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, state, imagination, act, next_state, val, logp, rew, ep_ret, ep_len))
+            logging.info("\nepisode: {} \nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(episode_counter+1, step_counter, state, imagination, act, next_state, val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
                 _, val, _ = brain.make_decision(state)
                 memory.finish_path(np.squeeze(val))
                 episode_counter+=1
                 episodic_returns.append(ep_ret)
-                sedimentary_returns.append(sum(episodic_returns)/episode_counter)
-                logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {}, EpLength: {} \n----\n".format(frame_counter, episode_counter, ep_ret, ep_len))
+                logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {} \n----\n".format(frame_counter, episode_counter, ep_ret))
+                ep_ret, ep_len = 0, 0
             # compute next obs, act, val, logp
             state = next_state # SUPER CRITICAL!!!
             act, val, logp = brain.make_decision(state) 
@@ -121,7 +121,6 @@ try:
     np.save(os.path.join(save_dir, 'replay_data.npy'), replay_data)
     np.save(os.path.join(save_dir, 'stepwise_frames.npy'), stepwise_frames)
     np.save(os.path.join(save_dir, 'episodic_returns.npy'), episodic_returns)
-    np.save(os.path.join(save_dir, 'sedimentary_returns.npy'), sedimentary_returns)
 except KeyboardInterrupt:    
     print("\r\nctrl + c:")
     eye.release()
