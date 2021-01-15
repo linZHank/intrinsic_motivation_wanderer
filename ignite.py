@@ -4,18 +4,12 @@ Initialize Intrinsic Motivation Agent (IMA)
 """
 import sys
 import os
-import time
-import numpy as np
-import cv2
 from datetime import datetime
-import logging
-logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
-from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
+from agents.intrinsic_motivation_agent import IntrinsicMotivationAgent
 
 
 # Parameters
-max_ep_len = 10
 dim_latent = 16
 dim_view = (128,128,1)
 dim_act = 1
