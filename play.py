@@ -31,7 +31,7 @@ eye.get(cv2.CAP_PROP_FPS)
 # Get agent ready
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
 seed = 'belauensis'
-load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-15-12-02') # typically use the last saved models
+load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-15-12-32') # typically use the last saved models
 brain.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
 brain.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
 brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
