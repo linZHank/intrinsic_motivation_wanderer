@@ -2,6 +2,7 @@
 """
 Deploy this script on the robot. The robot will play and collect experience data according to its imagination.
 """
+import sys
 import os
 import time
 import numpy as np
@@ -12,15 +13,15 @@ logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
 from drivers.mecanum_driver import MecanumDriver
 from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
+import tensorflow as tf
 
 # Parameters
 total_steps = 300
-max_ep_len = 10
-dim_latent = 8
-dim_origin = (128,128,1)
-dim_obs = (128,128,2)
+dim_latent = 16
+dim_view = (128,128,1)
 dim_act = 1
 num_act = 10
+
 # Get mecanum driver ready
 wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 # Get camera ready
@@ -28,66 +29,90 @@ wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
 eye.get(cv2.CAP_PROP_FPS)
 # Get agent ready
-brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_origin=dim_origin, act_type='discrete', dim_obs=dim_obs, dim_act=dim_act, num_act=num_act)
-memory = OnPolicyBuffer(dim_obs=dim_obs, dim_latent=dim_latent, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
+brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
+seed = 'belauensis'
+load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-15-13-02') # typically use the last saved models
+brain.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
+brain.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
+brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
+brain.actor = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
+brain.critic = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
+memory = OnPolicyBuffer(dim_latent=dim_latent, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
 # Generate first imagination and action
 ret, frame = eye.read() # obs = env.reset()
 view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
 view.resize(1,128,128,1)
-brain.imagine(view) 
-state = np.concatenate((view, brain.decoded_imagination), axis=-1)
-act, val, logp = brain.pi_of_a_given_s(state) 
+latent_distribution = brain.encode(view) # encoded distribution
+state = latent_distribution.sample() # brain.reparameterize(latent_distribution.mean(), latent_distribution.stddev())
+act, val, logp = brain.make_decision(state) 
 wheels.set_action(int(act))
+imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32)) # imagined latent state
 logging.info("\n====Ignition====\n")
 # Preapare for experience collecting
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
-visions_dir = save_dir+'visions'
-if not os.path.exists(visions_dir):
+views_dir = save_dir+'views'
+if not os.path.exists(views_dir):
     try:
-        os.makedirs(visions_dir)
+        os.makedirs(views_dir)
     except OSError as e:
         if e.errno != errno.EEXIST:
             raise
+max_ep_len = 10
 ep_ret, ep_len = 0, 0
 frame_counter = 0
 episode_counter = 0
 step_counter = 0
-episodic_returns, sedimentary_returns = [], []
+episodic_returns = []
 stepwise_frames = []
 time_elapse = 0
 prev_time_elapse = 0
 start_time = time.time()
+
 # Main loop
 try:
     while step_counter < total_steps:
         ret, frame = eye.read()
-        cv2.imwrite(os.path.join(save_dir, 'visions', str(frame_counter)+'.jpg'), frame)
+        cv2.imwrite(os.path.join(views_dir, str(frame_counter)+'.jpg'), frame)
         prev_time_elapse = time_elapse
         time_elapse = time.time() - start_time
         frame_counter+=1
-        if int(time_elapse)-int(prev_time_elapse): # change mecanum's behavior every 1 sec
-            view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
-            view.resize(1,128,128,1)
-            rew = brain.compute_intrinsic_reward(view)
+        if int(time_elapse)-int(prev_time_elapse): # take an action every sec
+            next_view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
+            next_view.resize(1,128,128,1)
+            next_latent_distribution = brain.encode(next_view)
+            next_state = next_latent_distribution.sample() # brain.reparameterize(next_latent_distribution.mean(), next_latent_distribution.stddev()) 
+            rew = brain.compute_intrinsic_reward(imagination, next_latent_distribution)
             ep_ret+=rew
             ep_len+=1
-            memory.store(state, np.squeeze(brain.imagination_sample), np.squeeze(brain.imagination.mean()), np.squeeze(brain.imagination.stddev()), act, rew, val, logp)
+            memory.store(
+                np.squeeze(latent_distribution.mean()), 
+                np.squeeze(latent_distribution.stddev()), 
+                np.squeeze(next_latent_distribution.mean()), 
+                np.squeeze(next_latent_distribution.stddev()), 
+                np.squeeze(state), 
+                np.squeeze(next_state), 
+                np.squeeze(imagination), 
+                act, 
+                rew, 
+                val, 
+                logp
+            )
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            logging.info("\nstep: {} \nencoded state: {} \naction: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(step_counter, brain.encoded_image, act, val, logp, rew, ep_ret, ep_len))
+            logging.info("\nepisode: {} \nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(episode_counter+1, step_counter, state, imagination, act, next_state, val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
-                _, val, _ = brain.pi_of_a_given_s(state)
+                _, val, _ = brain.make_decision(state)
                 memory.finish_path(np.squeeze(val))
                 episode_counter+=1
                 episodic_returns.append(ep_ret)
-                sedimentary_returns.append(sum(episodic_returns)/episode_counter)
-                logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {}, EpLength: {} \n----\n".format(frame_counter, episode_counter, ep_ret, ep_len))
+                logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {} \n----\n".format(frame_counter, episode_counter, ep_ret))
+                ep_ret, ep_len = 0, 0
             # compute next obs, act, val, logp
-            brain.imagine(view)
-            state = np.concatenate((view, brain.decoded_imagination), axis=-1)
-            act, val, logp = brain.pi_of_a_given_s(state) 
+            state = next_state # SUPER CRITICAL!!!
+            act, val, logp = brain.make_decision(state) 
             wheels.set_action(int(act))
+            imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32))
             
     # Save valuable items
     with open(os.path.join(save_dir, 'elapsed_time.txt'), 'w') as f:
@@ -96,7 +121,6 @@ try:
     np.save(os.path.join(save_dir, 'replay_data.npy'), replay_data)
     np.save(os.path.join(save_dir, 'stepwise_frames.npy'), stepwise_frames)
     np.save(os.path.join(save_dir, 'episodic_returns.npy'), episodic_returns)
-    np.save(os.path.join(save_dir, 'sedimentary_returns.npy'), sedimentary_returns)
 except KeyboardInterrupt:    
     print("\r\nctrl + c:")
     eye.release()
