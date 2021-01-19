@@ -17,7 +17,7 @@ seed = 'belauensis'
 
 # Load agent
 brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
-load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-18-12-59')
+load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-18-13-18')
 brain.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
 brain.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
 brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
@@ -25,7 +25,7 @@ brain.actor = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
 brain.critic = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 
 # Load data
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-18-13-18/'
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-19-18-05/'
 data = np.load(data_dir+'replay_data.npy', allow_pickle=True).item()
 sf = np.load(os.path.join(data_dir, 'stepwise_frames.npy'))
 frames = sf[-11:]-1
