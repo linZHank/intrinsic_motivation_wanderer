@@ -172,7 +172,139 @@ class VAE(tf.keras.Model):
             elbo_per_epoch.append(elbo)
         return elbo_per_epoch
 
+class CategoricalActor(tf.keras.Model):
 
+    def __init__(self, dim_obs, num_act, **kwargs):
+        super(CategoricalActor, self).__init__(name='categorical_actor', **kwargs)
+        self.dim_obs=dim_obs
+        self.num_act=num_act
+        self.policy_net = tf.keras.Sequential(
+            [
+                tf.keras.layers.InputLayer(input_shape=dim_obs, name='actor_inputs'),
+                tf.keras.layers.Dense(256, activation='relu'),
+                tf.keras.layers.Dense(256, activation='relu'),
+                tf.keras.layers.Dense(num_act, activation=None, name='actor_outputs')
+            ]
+        )
+
+    def _distribution(self, obs):
+        logits = tf.squeeze(self.policy_net(obs)) # squeeze to deal with size 1
+        d = tfd.Categorical(logits=logits)
+        return d
+
+    def _logprob(self, distribution, act):
+        logp_a = distribution.log_prob(act) # get log probability from a tfp distribution
+        return logp_a
+        
+    def call(self, obs, act=None):
+        pi = self._distribution(obs)
+        logp_a = None
+        if act is not None:
+            logp_a = self._logprob(pi, act)
+        return pi, logp_a
+
+class Critic(tf.keras.Model):
+    def __init__(self, dim_obs, **kwargs):
+        super(Critic, self).__init__(name='critic', **kwargs)
+        self.value_net = tf.keras.Sequential(
+            [
+                tf.keras.layers.InputLayer(input_shape=dim_obs, name='critic_inputs'),
+                tf.keras.layers.Dense(256, activation='relu'),
+                tf.keras.layers.Dense(256, activation='relu'),
+                tf.keras.layers.Dense(1, activation=None, name='critic_outputs')
+            ]
+        )
+
+    @tf.function
+    def call(self, obs):
+        return tf.squeeze(self.value_net(obs))
+
+class PPO(tf.keras.Model):
+    
+    def __init__(self, dim_obs=(8,), num_act=10, dim_act=1, clip_ratio=0.2, lr_actor=3e-4, lr_critic=1e-3, target_kld=0.02, beta=0., **kwargs):
+        super(PPO, self).__init__(name='ppo', **kwargs)
+        # params
+        self.continuous=continuous
+        self.clip_ratio = clip_ratio
+        self.dim_obs = dim_obs
+        self.dim_act = dim_act
+        self.beta = beta
+        self.target_kld = target_kld
+        # modules
+        self.actor = CategoricalActor(dim_obs, num_act)
+        self.critic = Critic(dim_obs)
+        self.actor_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_actor)
+        self.critic_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_critic)
+        self.mse = tf.keras.losses.MeanSquaredError()
+
+    @tf.function
+    def make_decision(self, obs):
+        pi = self.actor._distribution(obs)
+        act = pi.sample()
+        logp_a = self.actor._logprob(pi, act)
+        val = self.critic(obs)
+
+        return act, val, logp_a
+
+    def train(self, data, num_epochs):
+        # Update actor
+        ep_loss_pi = []
+        ep_kld = []
+        ep_ent = []
+        for ep in range(num_epochs):
+            logging.debug("Staring actor training epoch: {}".format(ep+1))
+            with tf.GradientTape() as tape:
+                tape.watch(self.actor.trainable_variables)
+                pi, lpa = self.actor(data['obs'], data['act'])
+                ratio = tf.math.exp(lpa - data['lpa']) # pi/old_pi
+                clip_adv = tf.math.multiply(tf.clip_by_value(ratio, 1-self.clip_ratio, 1+self.clip_ratio), data['adv'])
+                approx_kld = data['lpa'] - lpa
+                ent = tf.math.reduce_sum(pi.entropy(), axis=-1)
+                obj = tf.math.minimum(ratio*data['adv'], clip_adv) + self.beta*ent
+                loss_pi = -tf.math.reduce_mean(obj)
+            # gradient descent actor weights
+            grads_actor = tape.gradient(loss_pi, self.actor.trainable_variables)
+            self.actor_optimizer.apply_gradients(zip(grads_actor, self.actor.trainable_variables))
+            ep_loss_pi.append(loss_pi)
+            ep_kld.append(tf.math.reduce_mean(approx_kld))
+            ep_ent.append(tf.math.reduce_mean(ent))
+            # log epoch
+            logging.info("\n----Actor Training----\nEpoch :{} \nLoss: {} \nKLDivergence: {} \nEntropy: {}".format(
+                ep+1,
+                loss_pi,
+                ep_kld[-1],
+                ep_ent[-1],
+            ))
+            # early cutoff due to large kl-divergence
+            if ep_kld[-1] > self.target_kld:
+                logging.warning("\nEarly stopping at epoch {} due to reaching max kl-divergence.\n".format(ep+1))
+                break
+        mean_loss_pi = tf.math.reduce_mean(ep_loss_pi)
+        mean_ent = tf.math.reduce_mean(ep_ent)
+        mean_kld = tf.math.reduce_mean(ep_kld)
+        # Update critic
+        ep_loss_val = []
+        for ep in range(num_epochs):
+            logging.debug("Starting critic training epoch: {}".format(ep+1))
+            with tf.GradientTape() as tape:
+                tape.watch(self.critic.trainable_variables)
+                # loss_val = self.mse(data['ret'], self.critic(data['obs']))
+                loss_val = tf.keras.losses.MSE(data['ret'], self.critic(data['obs']))
+            # gradient descent critic weights
+            grads_critic = tape.gradient(loss_val, self.critic.trainable_variables)
+            self.critic_optimizer.apply_gradients(zip(grads_critic, self.critic.trainable_variables))
+            ep_loss_val.append(loss_val)
+            # log loss_v
+            logging.info("\n----Critic Training----\nEpoch :{} \nLoss: {}".format(
+                ep+1,
+                loss_val
+            ))
+        mean_loss_val = tf.math.reduce_mean(ep_loss_val)
+
+        return mean_loss_pi, mean_loss_val, dict(kld=mean_kld, entropy=mean_ent)
+
+class IntrinsicMotivationAgent(tf.keras.Model):
+    pass
 # class IntrinsicMotivationAgent(tf.keras.Model):
 # 
 #     def __init__(self, dim_latent, dim_view, dim_act, num_act=None, clip_ratio=0.2, beta=0., target_kl=0.01, **kwargs):
@@ -398,7 +530,7 @@ frames = sf[-11:]-1
 fig, ax = plt.subplots(nrows=10, ncols=2)
 for i in range(len(frames)-1):
     # original 
-    ori = cv2.imread(os.path.join(data_dir, 'views', str(frames[i])+'.jpg'), 0)
+    ori = cv2.imread(os.path.join(data_dir, 'views', str(frames[i])+'.jpg'), 0)/254.
     ax[i,0].imshow(ori, cmap='gray')
     ax[i,0].axis('off')
     # reconstruction
