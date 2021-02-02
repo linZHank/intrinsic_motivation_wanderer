@@ -41,7 +41,7 @@ dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
     image_size=(128, 128),
     batch_size=batch_size
 )
-dataset_views = dataset_views.map(lambda x, y: x/254.)
+dataset_views = dataset_views.map(lambda x, y: x/255.)
 replay_data = np.load(data_dir+'replay_data.npy', allow_pickle=True).item()
 
 # train autoencoder
