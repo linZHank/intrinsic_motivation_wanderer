@@ -18,48 +18,39 @@ def discount_cumsum(x, discount):
     magic from rllab for computing discounted cumulative sums of vectors.
     input:
         vector x,
-        [x0,
-         x1,
-         x2]
+        [x0, x1, x2]
     output:
-        [x0 + discount * x1 + discount^2 * x2,
-         x1 + discount * x2,
-         x2]
+        [x0+discount*x1+discount^2*x2, x1+discount*x2, x2]
     """
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
 class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they will be saved in hard disk.
 
-    def __init__(self, dim_latent, dim_act, size, gamma=0.99, lam=0.95):
-        self.latmean_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.latstd_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.nlatmean_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.nlatstd_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.state_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.nstate_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.imn_buf = np.zeros((size, dim_latent), dtype=np.float32)
-        self.act_buf = np.zeros((size, dim_act), dtype=np.float32)
-        self.rew_buf = np.zeros(size, dtype=np.float32)
-        self.val_buf = np.zeros(size, dtype=np.float32)
-        self.logp_buf = np.zeros(size, dtype=np.float32)
-        self.ret_buf = np.zeros(size, dtype=np.float32)
-        self.adv_buf = np.zeros(size, dtype=np.float32)
-        self.gamma, self.lam = gamma, lam
-        self.ptr, self.path_start_idx, self.max_size = 0, 0, size
+    def __init__(self, dim_state=8, dim_act=1, max_size=1000, gamma=0.99, lam=0.97):
+        # params
+        self.dim_state = dim_state
+        self.dim_act = dim_act
+        self.max_size = max_size
+        self.gamma = gamma
+        self.lam = lam
+        # init buffers
+        self.stt_buf = np.zeros(shape=(max_size, dim_state), dtype=np.float32) # state, default dtype=tf.float32
+        self.act_buf = np.zeros(shape=(max_size, dim_act), dtype=np.float32) # action
+        self.rew_buf = np.zeros(shape=(max_size,), dtype=np.float32) # reward
+        self.val_buf = np.zeros(shape=(max_size,), dtype=np.float32) # value
+        self.ret_buf = np.zeros(shape=(max_size,), dtype=np.float32) # rewards-to-go return
+        self.adv_buf = np.zeros(shape=(max_size,), dtype=np.float32) # advantage
+        self.lpa_buf = np.zeros(shape=(max_size,), dtype=np.float32) # logprob(action)
+        # variables
+        self.ptr, self.path_start_idx = 0, 0
 
-    def store(self, latent_mean, latent_stddev, nextlatent_mean, nextlatent_stddev, state, nextstate, imagination, act, rew, val, logp):
+    def store(self, stt, act, rew, val, lpa):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
-        self.latmean_buf[self.ptr] = latent_mean
-        self.latstd_buf[self.ptr] = latent_stddev
-        self.nlatmean_buf[self.ptr] = nextlatent_mean
-        self.nlatstd_buf[self.ptr] = nextlatent_stddev
-        self.state_buf[self.ptr] = state
-        self.nstate_buf[self.ptr] = nextstate
-        self.imn_buf[self.ptr] = imagination
+        self.stt_buf[self.ptr] = stt
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
-        self.logp_buf[self.ptr] = logp
+        self.lpa_buf[self.ptr] = lpa
         self.ptr += 1
 
     def finish_path(self, last_val=0):
@@ -68,31 +59,31 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         vals = np.append(self.val_buf[path_slice], last_val)
         # the next two lines implement GAE-Lambda advantage calculation
         deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
-        self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma * self.lam)
+        self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma*self.lam)
         # the next line computes rewards-to-go, to be targets for the value function
         self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
         self.path_start_idx = self.ptr
-        # self.ptr, self.path_start_idx = 0, 0
 
     def get(self):
-        assert self.ptr == self.max_size    # buffer has to be full before you can get
+        assert self.ptr <= self.max_size    # buffer has to be full before you can get
         self.ptr, self.path_start_idx = 0, 0
-        # the next two lines implement the advantage normalization trick
+        self.stt_buf = self.stt_buf[:self.ptr] 
+        self.act_buf = self.act_buf[:self.ptr] 
+        self.rew_buf = self.rew_buf[:self.ptr] 
+        self.val_buf = self.val_buf[:self.ptr] 
+        self.ret_buf = self.ret_buf[:self.ptr] 
+        self.adv_buf = self.adv_buf[:self.ptr] 
+        self.lpa_buf = self.lpa_buf[:self.ptr]
+        # the next three lines implement the advantage normalization trick
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
         data = dict(
-            latmean=self.latmean_buf, 
-            latstd=self.latstd_buf, 
-            nlatmean=self.nlatmean_buf, 
-            nlatstd=self.nlatstd_buf, 
-            state=self.state_buf, 
-            nstate=self.nstate_buf, 
-            imn=self.imn_buf, 
+            stt=self.stt_buf, 
             act=self.act_buf, 
             ret=self.ret_buf, 
             adv=self.adv_buf, 
-            logp=self.logp_buf
+            lpa=self.lpa_buf
         )
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
 ################################################################
@@ -404,7 +395,7 @@ for i in range(len(frames)-1):
     # reconstruction
     mu, logsigma = vae.encode(np.expand_dims(ori,0))
     z = vae.reparameterize(mu, tf.math.exp(logsigma))
-    rec = vae.decode(z, apply_sigmoid=True)
+    rec = vae.decode(z)
     ax[i,1].imshow(rec[0,:,:,0], cmap='gray')
     ax[i,1].axis('off')
 
