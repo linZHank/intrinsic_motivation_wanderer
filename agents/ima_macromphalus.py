@@ -24,7 +24,7 @@ def discount_cumsum(x, discount):
     """
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they will be saved in hard disk.
+class OnPolicyBuffer: # To save memory, no image will be saved. 
 
     def __init__(self, dim_state=8, dim_act=1, max_size=1000, gamma=0.99, lam=0.97):
         # params
@@ -34,7 +34,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         self.gamma = gamma
         self.lam = lam
         # init buffers
-        self.stt_buf = np.zeros(shape=(max_size, dim_state), dtype=np.float32) # state, default dtype=tf.float32
+        self.obs_buf = np.zeros(shape=(max_size, dim_state), dtype=np.float32) # state, default dtype=tf.float32
         self.act_buf = np.zeros(shape=(max_size, dim_act), dtype=np.float32) # action
         self.rew_buf = np.zeros(shape=(max_size,), dtype=np.float32) # reward
         self.val_buf = np.zeros(shape=(max_size,), dtype=np.float32) # value
@@ -44,9 +44,9 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         # variables
         self.ptr, self.path_start_idx = 0, 0
 
-    def store(self, stt, act, rew, val, lpa):
+    def store(self, obs, act, rew, val, lpa):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
-        self.stt_buf[self.ptr] = stt
+        self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
@@ -67,7 +67,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
     def get(self):
         assert self.ptr <= self.max_size    # buffer has to be full before you can get
         self.ptr, self.path_start_idx = 0, 0
-        self.stt_buf = self.stt_buf[:self.ptr] 
+        self.obs_buf = self.obs_buf[:self.ptr] 
         self.act_buf = self.act_buf[:self.ptr] 
         self.rew_buf = self.rew_buf[:self.ptr] 
         self.val_buf = self.val_buf[:self.ptr] 
@@ -79,7 +79,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
         adv_std = np.std(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
         data = dict(
-            stt=self.stt_buf, 
+            obs=self.obs_buf, 
             act=self.act_buf, 
             ret=self.ret_buf, 
             adv=self.adv_buf, 
@@ -89,6 +89,9 @@ class OnPolicyBuffer: # To save memory, no image will be saved. Instead, they wi
 ################################################################
 
 class VAE(tf.keras.Model):
+    """
+    Variational autoencoder
+    """
 
     def __init__(self, dim_view, dim_latent, **kwargs):
         super(VAE, self).__init__(name='vae', **kwargs)
@@ -179,12 +182,28 @@ class Critic(tf.keras.Model):
     def call(self, obs):
         return tf.squeeze(self.value_net(obs))
 
+class DynamicsModel(tf.keras.Model):
+    def __init__(self, dim_obs, dim_act, **kwargs):
+        super(DynamicsModel, self).__init__(name='dynamics_model', **kwargs)
+        inputs_obs = tf.keras.Input(shape=(dim_obs,), name='dynamics_inputs_obs')
+        inputs_act = tf.keras.Input(shape=(dim_act,), name='dynamics_inputs_act')
+        x = tf.keras.layers.concatenate([inputs_state, inputs_act])
+        x = tf.keras.layers.Dense(256, activation='relu')(x)
+        x = tf.keras.layers.Dense(256, activation='relu')(x)
+        outputs_mean = tf.keras.layers.Dense(dim_obs, name='dynamics_ouputs_mean')(x)
+        outputs_logstddev = tf.keras.layers.Dense(dim_obs, name='dynamics_ouputs_logstddev')(x)
+        self.dynamics_net = tf.keras.Model(inputs=[inputs_obs, inputs_act], outputs=[outputs_mean, outputs_logstddev])
+
+    @tf.function
+    def call(self, obs, act):
+        return tf.squeeze(self.dynamics_net(obs, act))
+
 class IntrinsicMotivationAgent(tf.keras.Model):
-    def __init__(self, dim_view=(128,128,1), dim_latent=8, num_act=10, clip_ratio=0.2, beta=0., target_kl=0.1, lr_vae=1e-4, lr_actor=3e-4, lr_critic=1e-3, **kwargs):
+    def __init__(self, dim_view=(128,128,1), dim_latent=8, num_act=10, clip_ratio=0.2, beta=0., target_kl=0.1, lr_vae=3e-4, lr_actor=1e-4, lr_critic=3e-4, **kwargs):
         super(IntrinsicMotivationAgent, self).__init__(name='ima', **kwargs)
         # parameters
-        self.dim_latent = dim_latent
         self.dim_view = dim_view
+        self.dim_latent = dim_latent
         self.dim_act = dim_act
         self.clip_ratio = clip_ratio
         self.beta = beta
