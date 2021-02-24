@@ -87,50 +87,82 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
 ################################################################
 
 ################################################################
-class VariationalAutoencoder(tf.keras.Model):
-    """
-    Variational autoencoder
-    """
-    def __init__(self, dim_view, dim_latent, **kwargs):
-        super(VariationalAutoencoder, self).__init__(name='vae', **kwargs)
-        self.dim_view = dim_view
+class Encoder(tf.keras.Model):
+    def __init__(self, dim_origin, dim_latent, **kwargs):
+        super(Encoder, self).__init__(name='encoder', **kwargs)
+        # params
+        self.dim_origin = dim_origin
         self.dim_latent = dim_latent
-        # construct encoder
-        inputs_encoder = tf.keras.Input(shape=dim_view, name='encoder_inputs')
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(inputs_encoder)
+        # encoder net
+        inputs = tf.keras.Input(shape=dim_origin, name='encoder_inputs')
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(inputs)
         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
         x = tf.keras.layers.Flatten()(x)
         mu = tf.keras.layers.Dense(dim_latent, name='encoder_outputs_mean')(x)
         logsigma = tf.keras.layers.Dense(dim_latent, name='encoder_outputs_logstddev')(x)
-        self.encoder = tf.keras.Model(inputs=inputs_encoder, outputs = [mu, logsigma])
-        # construct decoder
-        inputs_decoder = tf.keras.Input(shape=(dim_latent,), name='decoder_inputs')
-        x = tf.keras.layers.Dense(units=16*16*64, activation='relu')(inputs_decoder) 
+        self.encoder_net = tf.keras.Model(inputs=inputs, outputs = [mu, logsigma])
+
+    @tf.function
+    def call(self, origin):
+        mean, logstddev = self.encoder_net(origin)
+        return tf.squeeze(mean), tf.squeeze(logstddev)
+
+class Decoder(tf.keras.Model):
+    def __init__(self, dim_latent, **kwargs):
+        super(Decoder, self).__init__(name='decoder', **kwargs)
+        # params
+        self.dim_latent = dim_latent
+        # encoder net
+        inputs = tf.keras.Input(shape=dim_latent, name='encoder_inputs')
+        x = tf.keras.layers.Dense(units=16*16*64, activation='relu')(inputs) 
         x = tf.keras.layers.Reshape(target_shape=(16, 16, 64))(x)
         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
-        outputs_decoder = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=4, strides=1, padding='same', name='decoder_outputs')(x)
-        self.decoder = tf.keras.Model(inputs=inputs_decoder, outputs=outputs_decoder)
+        outputs = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=4, strides=1, padding='same', name='decoder_outputs')(x)
+        self.decoder_net = tf.keras.Model(inputs=inputs, outputs = outputs)
+
+    @tf.function
+    def call(self, latent):
+        reconstruction = self.decoder_net(latent)
+        if apply_sigmoid:
+            probs = tf.math.sigmoid(reconstruction)
+            return probs
+        return reconstruction
+
+class VariationalAutoencoder(tf.keras.Model):
+    """
+    Variational autoencoder
+    """
+    def __init__(self, dim_origin, dim_latent, **kwargs):
+        super(VariationalAutoencoder, self).__init__(name='vae', **kwargs)
+        # params
+        self.dim_origin = dim_origin
+        self.dim_latent = dim_latent
+        # modules
+        self.encoder = Encoder(dim_origin, dim_latent)
+        self.decoder = Decoder(dim_latent)
+        # optimizer
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
 
     @tf.function
     def reparameterize(self, mean, std):
         eps = tf.random.normal(shape=mean.shape)
         return mean + eps*std 
 
-    @tf.function
-    def encode(self, img):
-        mean, logstd = self.encoder(img)
-        return tf.squeeze(mean), tf.squeeze(logstd)
-
-    @tf.function
-    def decode(self, z, apply_sigmoid=False):
-        logits = self.decoder(z)
-        if apply_sigmoid:
-            probs = tf.math.sigmoid(logits)
-            return probs
-        return logits
+#     @tf.function
+#     def encode(self, img):
+#         mean, logstd = self.encoder(img)
+#         return tf.squeeze(mean), tf.squeeze(logstd)
+# 
+#     @tf.function
+#     def decode(self, z, apply_sigmoid=False):
+#         logits = self.decoder(z)
+#         if apply_sigmoid:
+#             probs = tf.math.sigmoid(logits)
+#             return probs
+#         return logits
 
     def train(self, dataset, num_epochs):
 
@@ -145,10 +177,10 @@ class VariationalAutoencoder(tf.keras.Model):
             for batch in dataset:
                 with tf.GradientTape() as tape:
                     tape.watch(self.encoder.trainable_weights + self.decoder.trainable_weights)
-                    mean, logstd = self.encode(batch)
+                    mean, logstd = self.encoder(batch)
                     z = self.reparameterize(mean, logstd)
-                    reconstructed = self.decode(z)
-                    cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=reconstructed, labels=batch)
+                    x_rec = self.decoder(z)
+                    cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=x_rec, labels=batch)
                     logpx_z = -tf.reduce_sum(cross_ent, axis=[1, 2, 3])
                     logpz = log_normal_pdf(z, 0., 0.)
                     logqz_x = log_normal_pdf(z, mean, logstd)
@@ -162,6 +194,32 @@ class VariationalAutoencoder(tf.keras.Model):
             logging.info("Epoch {} ELBO: {}".format(e+1,elbo))
             elbo_per_epoch.append(elbo)
         return elbo_per_epoch
+# class VariationalAutoencoder(tf.keras.Model):
+#     """
+#     Variational autoencoder
+#     """
+#     def __init__(self, dim_view, dim_latent, **kwargs):
+#         super(VariationalAutoencoder, self).__init__(name='vae', **kwargs)
+#         self.dim_view = dim_view
+#         self.dim_latent = dim_latent
+#         # construct encoder
+#         inputs_encoder = tf.keras.Input(shape=dim_view, name='encoder_inputs')
+#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(inputs_encoder)
+#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
+#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
+#         x = tf.keras.layers.Flatten()(x)
+#         mu = tf.keras.layers.Dense(dim_latent, name='encoder_outputs_mean')(x)
+#         logsigma = tf.keras.layers.Dense(dim_latent, name='encoder_outputs_logstddev')(x)
+#         self.encoder = tf.keras.Model(inputs=inputs_encoder, outputs = [mu, logsigma])
+#         # construct decoder
+#         inputs_decoder = tf.keras.Input(shape=(dim_latent,), name='decoder_inputs')
+#         x = tf.keras.layers.Dense(units=16*16*64, activation='relu')(inputs_decoder) 
+#         x = tf.keras.layers.Reshape(target_shape=(16, 16, 64))(x)
+#         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
+#         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
+#         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
+#         outputs_decoder = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=4, strides=1, padding='same', name='decoder_outputs')(x)
+#         self.decoder = tf.keras.Model(inputs=inputs_decoder, outputs=outputs_decoder)
 ################################################################
 
 ################################################################

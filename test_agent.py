@@ -12,13 +12,13 @@ agent = IntrinsicMotivationAgent()
 buf = OnPolicyBuffer(max_size=100)
  
 # collect experience
-img = np.random.uniform(0,1,(1,128,128,1))
-o, _ = agent.vae.encode(img)
+i = np.random.uniform(0,1,(1,128,128,1))
+o, _ = agent.vae.encoder(i)
 a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
 mu, logsigma = agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
 for _ in range(100):
-    img2 = np.random.uniform(0,1,(1,128,128,1))
-    o2, _ = agent.vae.encode(img2)
+    i2 = np.random.uniform(0,1,(1,128,128,1))
+    o2, _ = agent.vae.encoder(i2)
     r = agent.compute_intrinsic_reward(mu, logsigma, o2)
     buf.store(
         o, 
