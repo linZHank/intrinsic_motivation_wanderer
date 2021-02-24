@@ -6,92 +6,53 @@ tfd = tfp.distributions
 import logging
 logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
-from agents.intrinsic_motivation_agent import IntrinsicMotivationAgent, OnPolicyBuffer
+from agents.ima_macromphalus import IntrinsicMotivationAgent, OnPolicyBuffer
 
-dim_latent = 8
-dim_view = (128,128,1)
-dim_act = 1
-num_act = 10
-buffer_size = 300
-
-agent = IntrinsicMotivationAgent(dim_latent,dim_view,dim_act,num_act)
-buf = OnPolicyBuffer(dim_latent, dim_act, buffer_size)
-
-# encoder
-imgs = np.random.uniform(0,1,(100,128,128,1))
-lats_m, lats_logs = agent.encoder(imgs)
-lats = agent.encode(imgs)
-# decoder
-ls= np.random.normal(0,1,(100,8))
-rec_imgs = agent.decoder(ls)
-rec_imgs_ = agent.decode(ls, apply_sigmoid=True)
-# imaginator
-acts = tf.convert_to_tensor(np.random.randint(0,10,(100,1)), dtype=tf.float32)
-ss = lats.sample()
-imn_ss = agent.imaginator([ss, acts])
-imn_ss_ = agent.imagine(ss, acts)
-# actor
-logits = agent.actor(ss)
-vs = agent.critic(ss)
-vals = agent.estimate_value(ss)
-acts_, vals_, logp_as = agent.make_decision(ss)
-# reward
-img = np.random.uniform(0,1,(1,128,128,1))
-distr = agent.encode(img)
-state = distr.sample()
-act = tf.convert_to_tensor(np.random.randint(0,10,(1,1)), dtype=tf.float32)
-imgn = agent.imagine(state, act)
-nimg = np.random.uniform(0,1,(1,128,128,1))
-ndistr = agent.encode(nimg)
-r = agent.compute_intrinsic_reward(imgn, ndistr)
-
+agent = IntrinsicMotivationAgent()
+buf = OnPolicyBuffer(max_size=100)
+ 
 # collect experience
 img = np.random.uniform(0,1,(1,128,128,1))
-lat = agent.encode(img)
-s = lat.sample()
-a, v, logp_a = agent.make_decision(s)
-imn = agent.imagine(s, np.reshape(a, (1,1)).astype(np.float32))
-for _ in range(buffer_size):
-    nimg = np.random.uniform(0,1,(1,128,128,1))
-    nlat = agent.encode(nimg)
-    ns = nlat.sample()
-    r = agent.compute_intrinsic_reward(imn, nlat)
+o, _ = agent.vae.encode(img)
+a, v, l = agent.make_decision(tf.expand_dims(o,0))
+mu, logsigma = agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
+for _ in range(100):
+    img2 = np.random.uniform(0,1,(1,128,128,1))
+    o2, _ = agent.vae.encode(img2)
+    r = agent.compute_intrinsic_reward(mu, logsigma, o2)
     buf.store(
-        np.squeeze(lat.mean()), 
-        np.squeeze(lat.stddev()), 
-        np.squeeze(nlat.mean()), 
-        np.squeeze(nlat.stddev()), 
-        np.squeeze(s), 
-        np.squeeze(ns), 
-        np.squeeze(imn), 
+        o, 
         a, 
         r, 
         v, 
-        logp_a
+        l, 
     )
-    s = ns
-    a, v, logp_a = agent.make_decision(s)
-    imn = agent.imagine(s, np.reshape(a, (1,1)).astype(np.float32))
-_, v, _ = agent.make_decision(s)
+    o = o2
+    a, v, l = agent.make_decision(tf.expand_dims(o,0))
+    mu, logsigma = agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
+_, v, _ = agent.make_decision(tf.expand_dims(o,0))
 buf.finish_path(v)
 
-# train_vae
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07'
-dataset = tf.keras.preprocessing.image_dataset_from_directory(data_dir, color_mode='grayscale', image_size=(128,128), batch_size=32)
-dataset = dataset.map(lambda x, y: x/255.)
-loss_elbo = agent.train_autoencoder(dataset, num_epochs=20)
-
-fig, ax = plt.subplots(figsize=(10,20), nrows=10, ncols=2)
-for imgs in dataset.take(1):
-    encs = agent.encode(imgs)
-    z = encs.sample()
-    recs = agent.decode(z) 
-    for i in range(10):
-        ax[i,0].imshow(imgs[i,:,:,0], cmap='gray')
-        ax[i,0].axis('off')
-        ax[i,1].imshow(recs[i,:,:,0], cmap='gray')
-        ax[i,1].axis('off')
-plt.show()
+# train actor critic
+data = buf.get()
+loss_pi, loss_val, loss_info = agent.train_ac(data, 80)
+# # train_vae
+# data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07'
+# dataset = tf.keras.preprocessing.image_dataset_from_directory(data_dir, color_mode='grayscale', image_size=(128,128), batch_size=32)
+# dataset = dataset.map(lambda x, y: x/255.)
+# loss_elbo = agent.train_autoencoder(dataset, num_epochs=20)
+# 
+# fig, ax = plt.subplots(figsize=(10,20), nrows=10, ncols=2)
+# for imgs in dataset.take(1):
+#     encs = agent.encode(imgs)
+#     z = encs.sample()
+#     recs = agent.decode(z) 
+#     for i in range(10):
+#         ax[i,0].imshow(imgs[i,:,:,0], cmap='gray')
+#         ax[i,0].axis('off')
+#         ax[i,1].imshow(recs[i,:,:,0], cmap='gray')
+#         ax[i,1].axis('off')
+# plt.show()
 
 # # train vae
 # bsize = 32

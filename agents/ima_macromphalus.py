@@ -26,15 +26,15 @@ def discount_cumsum(x, discount):
 
 class OnPolicyBuffer: # To save memory, no image will be saved. 
 
-    def __init__(self, dim_state=8, dim_act=1, max_size=1000, gamma=0.99, lam=0.97):
+    def __init__(self, dim_obs=8, dim_act=1, max_size=1000, gamma=0.99, lam=0.97):
         # params
-        self.dim_state = dim_state
+        self.dim_state = dim_obs
         self.dim_act = dim_act
         self.max_size = max_size
         self.gamma = gamma
         self.lam = lam
         # init buffers
-        self.obs_buf = np.zeros(shape=(max_size, dim_state), dtype=np.float32) # state, default dtype=tf.float32
+        self.obs_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # state, default dtype=tf.float32
         self.act_buf = np.zeros(shape=(max_size, dim_act), dtype=np.float32) # action
         self.rew_buf = np.zeros(shape=(max_size,), dtype=np.float32) # reward
         self.val_buf = np.zeros(shape=(max_size,), dtype=np.float32) # value
@@ -65,8 +65,6 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.path_start_idx = self.ptr
 
     def get(self):
-        assert self.ptr <= self.max_size    # buffer has to be full before you can get
-        self.ptr, self.path_start_idx = 0, 0
         self.obs_buf = self.obs_buf[:self.ptr] 
         self.act_buf = self.act_buf[:self.ptr] 
         self.rew_buf = self.rew_buf[:self.ptr] 
@@ -124,7 +122,7 @@ class VAE(tf.keras.Model):
     @tf.function
     def encode(self, img):
         mean, logstd = self.encoder(img)
-        return mean, logstd
+        return tf.squeeze(mean), tf.squeeze(logstd)
 
     @tf.function
     def decode(self, z, apply_sigmoid=False):
@@ -185,9 +183,11 @@ class Critic(tf.keras.Model):
 class DynamicsModel(tf.keras.Model):
     def __init__(self, dim_obs, dim_act, **kwargs):
         super(DynamicsModel, self).__init__(name='dynamics_model', **kwargs)
+        self.dim_obs=dim_obs
+        self.dim_act=dim_act
         inputs_obs = tf.keras.Input(shape=(dim_obs,), name='dynamics_inputs_obs')
         inputs_act = tf.keras.Input(shape=(dim_act,), name='dynamics_inputs_act')
-        x = tf.keras.layers.concatenate([inputs_state, inputs_act])
+        x = tf.keras.layers.concatenate([inputs_obs, inputs_act])
         x = tf.keras.layers.Dense(256, activation='relu')(x)
         x = tf.keras.layers.Dense(256, activation='relu')(x)
         outputs_mean = tf.keras.layers.Dense(dim_obs, name='dynamics_ouputs_mean')(x)
@@ -196,10 +196,11 @@ class DynamicsModel(tf.keras.Model):
 
     @tf.function
     def call(self, obs, act):
-        return tf.squeeze(self.dynamics_net(obs, act))
+        mean, logstddev = self.dynamics_net([obs, act])
+        return tf.squeeze(mean), tf.squeeze(logstddev)
 
 class IntrinsicMotivationAgent(tf.keras.Model):
-    def __init__(self, dim_view=(128,128,1), dim_latent=8, num_act=10, clip_ratio=0.2, beta=0., target_kl=0.1, lr_vae=3e-4, lr_actor=1e-4, lr_critic=3e-4, **kwargs):
+    def __init__(self, dim_view=(128,128,1), dim_latent=8, num_act=10, dim_act=1, clip_ratio=0.2, beta=0., target_kld=0.1, **kwargs):
         super(IntrinsicMotivationAgent, self).__init__(name='ima', **kwargs)
         # parameters
         self.dim_view = dim_view
@@ -207,15 +208,17 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.dim_act = dim_act
         self.clip_ratio = clip_ratio
         self.beta = beta
-        self.target_kl = target_kl
+        self.target_kld = target_kld
         # modules
         self.vae = VAE(dim_view, dim_latent)
         self.actor = CategoricalActor(dim_latent, num_act)
         self.critic = Critic(dim_latent)
+        self.imaginator = DynamicsModel(dim_latent, dim_act)
         # optimizers
-        self.optimizer_vae = tf.keras.optimizers.Adam(learning_rate=lr_vae)
-        self.optimizer_actor = tf.keras.optimizers.Adam(learning_rate=lr_actor)
-        self.optimizer_critic = tf.keras.optimizers.Adam(learning_rate=lr_critic)
+        self.optimizer_vae = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        self.optimizer_actor = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        self.optimizer_critic = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        self.optimizer_imaginator = tf.keras.optimizers.Adam(learning_rate=3e-4)
 
     @tf.function
     def make_decision(self, obs):
@@ -225,6 +228,16 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         val = self.critic(obs)
 
         return act, val, logp_a
+
+    @ tf.function
+    def compute_intrinsic_reward(self, imagine_mean, imagine_logstddev, latent_feature):
+        """
+        Less likely state results in larger reward, which simulates curiosity
+        """
+        imagine_distribution = tfd.Normal(loc=imagine_mean, scale=tf.math.exp(imagine_logstddev))
+        reward = -tf.math.reduce_mean(imagine_distribution.log_prob(latent_feature), axis=-1)
+
+        return tf.squeeze(tf.clip_by_value(reward, 0, 10))
 
     def train_vae(self, dataset, num_epochs):
 
@@ -256,7 +269,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
             elbo_per_epoch.append(elbo)
         return elbo_per_epoch
 
-    def train_ppo(self, data, num_epochs):
+    def train_ac(self, data, num_epochs):
         # Update actor
         ep_loss_pi = []
         ep_kld = []
@@ -316,36 +329,36 @@ class IntrinsicMotivationAgent(tf.keras.Model):
     
 
 
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07/'
-dataset = tf.keras.preprocessing.image_dataset_from_directory(
-    data_dir,
-    color_mode='grayscale',
-    image_size=(128, 128),
-    batch_size=64
-)
-dataset = dataset.map(lambda x, y: x/254.)
-vae = VAE()
-loss_elbo = vae.train(dataset, num_epochs=20)
-import os
-import matplotlib.pyplot as plt
-import cv2
-sf = np.load(os.path.join(data_dir, 'stepwise_frames.npy'))
-frames = sf[-11:]-1
-fig, ax = plt.subplots(nrows=10, ncols=2)
-for i in range(len(frames)-1):
-    # original 
-    ori = cv2.imread(os.path.join(data_dir, 'views', str(frames[i])+'.jpg'), 0)/254.
-    ax[i,0].imshow(ori, cmap='gray')
-    ax[i,0].axis('off')
-    # reconstruction
-    mu, logsigma = vae.encode(np.expand_dims(ori,0))
-    z = vae.reparameterize(mu, tf.math.exp(logsigma))
-    rec = vae.decode(z)
-    ax[i,1].imshow(rec[0,:,:,0], cmap='gray')
-    ax[i,1].axis('off')
-
-plt.subplots_adjust(wspace=0, hspace=.1)
-plt.tight_layout()
-plt.show()
+# data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07/'
+# dataset = tf.keras.preprocessing.image_dataset_from_directory(
+#     data_dir,
+#     color_mode='grayscale',
+#     image_size=(128, 128),
+#     batch_size=64
+# )
+# dataset = dataset.map(lambda x, y: x/254.)
+# vae = VAE()
+# loss_elbo = vae.train(dataset, num_epochs=20)
+# import os
+# import matplotlib.pyplot as plt
+# import cv2
+# sf = np.load(os.path.join(data_dir, 'stepwise_frames.npy'))
+# frames = sf[-11:]-1
+# fig, ax = plt.subplots(nrows=10, ncols=2)
+# for i in range(len(frames)-1):
+#     # original 
+#     ori = cv2.imread(os.path.join(data_dir, 'views', str(frames[i])+'.jpg'), 0)/254.
+#     ax[i,0].imshow(ori, cmap='gray')
+#     ax[i,0].axis('off')
+#     # reconstruction
+#     mu, logsigma = vae.encode(np.expand_dims(ori,0))
+#     z = vae.reparameterize(mu, tf.math.exp(logsigma))
+#     rec = vae.decode(z)
+#     ax[i,1].imshow(rec[0,:,:,0], cmap='gray')
+#     ax[i,1].axis('off')
+# 
+# plt.subplots_adjust(wspace=0, hspace=.1)
+# plt.tight_layout()
+# plt.show()
 
 
