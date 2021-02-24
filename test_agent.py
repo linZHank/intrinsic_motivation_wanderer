@@ -14,7 +14,7 @@ buf = OnPolicyBuffer(max_size=100)
 # collect experience
 img = np.random.uniform(0,1,(1,128,128,1))
 o, _ = agent.vae.encode(img)
-a, v, l = agent.make_decision(tf.expand_dims(o,0))
+a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
 mu, logsigma = agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
 for _ in range(100):
     img2 = np.random.uniform(0,1,(1,128,128,1))
@@ -28,14 +28,14 @@ for _ in range(100):
         l, 
     )
     o = o2
-    a, v, l = agent.make_decision(tf.expand_dims(o,0))
+    a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
     mu, logsigma = agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
-_, v, _ = agent.make_decision(tf.expand_dims(o,0))
+_, v, _ = agent.ac.make_decision(tf.expand_dims(o,0))
 buf.finish_path(v)
 
 # train actor critic
 data = buf.get()
-loss_pi, loss_val, loss_info = agent.train_ac(data, 80)
+loss_pi, loss_val, loss_info = agent.ac.train(data, 80)
 # # train_vae
 # data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07'
 # dataset = tf.keras.preprocessing.image_dataset_from_directory(data_dir, color_mode='grayscale', image_size=(128,128), batch_size=32)
