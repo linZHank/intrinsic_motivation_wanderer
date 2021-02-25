@@ -124,7 +124,7 @@ class Decoder(tf.keras.Model):
         self.decoder_net = tf.keras.Model(inputs=inputs, outputs = outputs)
 
     @tf.function
-    def call(self, latent):
+    def call(self, latent, apply_sigmoid=False):
         reconstruction = self.decoder_net(latent)
         if apply_sigmoid:
             probs = tf.math.sigmoid(reconstruction)
@@ -187,7 +187,7 @@ class VariationalAutoencoder(tf.keras.Model):
                     loss_vae = -tf.math.reduce_mean(logpx_z + logpz - logqz_x)
                     loss_vae_mean = metrics_mean(loss_vae)
                 gradients_vae = tape.gradient(loss_vae, self.encoder.trainable_weights+self.decoder.trainable_weights)
-                self.optimizer_vae.apply_gradients(zip(gradients_vae, self.encoder.trainable_weights+self.decoder.trainable_weights))
+                self.optimizer.apply_gradients(zip(gradients_vae, self.encoder.trainable_weights+self.decoder.trainable_weights))
                 step_cntr += 1
                 logging.debug("Epoch: {}, Step: {} \nVAE Loss: {}".format(e+1, step_cntr, loss_vae))
             elbo = -loss_vae_mean

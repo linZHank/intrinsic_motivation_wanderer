@@ -36,23 +36,22 @@ buf.finish_path(v)
 # train actor critic
 data = buf.get()
 loss_pi, loss_val, loss_info = agent.ac.train(data, 80)
-# # train_vae
-# data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07'
-# dataset = tf.keras.preprocessing.image_dataset_from_directory(data_dir, color_mode='grayscale', image_size=(128,128), batch_size=32)
-# dataset = dataset.map(lambda x, y: x/255.)
-# loss_elbo = agent.train_autoencoder(dataset, num_epochs=20)
-# 
-# fig, ax = plt.subplots(figsize=(10,20), nrows=10, ncols=2)
-# for imgs in dataset.take(1):
-#     encs = agent.encode(imgs)
-#     z = encs.sample()
-#     recs = agent.decode(z) 
-#     for i in range(10):
-#         ax[i,0].imshow(imgs[i,:,:,0], cmap='gray')
-#         ax[i,0].axis('off')
-#         ax[i,1].imshow(recs[i,:,:,0], cmap='gray')
-#         ax[i,1].axis('off')
-# plt.show()
+# train_vae
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07'
+dataset = tf.keras.preprocessing.image_dataset_from_directory(data_dir, color_mode='grayscale', image_size=(128,128), batch_size=32)
+dataset = dataset.map(lambda x, y: x/255.)
+loss_elbo = agent.vae.train(dataset, num_epochs=20)
+
+fig, ax = plt.subplots(figsize=(10,20), nrows=10, ncols=2)
+for imgs in dataset.take(1):
+    z, _ = agent.vae.encoder(imgs)
+    recs = agent.vae.decoder(z) 
+    for i in range(10):
+        ax[i,0].imshow(imgs[i,:,:,0], cmap='gray')
+        ax[i,0].axis('off')
+        ax[i,1].imshow(recs[i,:,:,0], cmap='gray')
+        ax[i,1].axis('off')
+plt.show()
 
 # # train vae
 # bsize = 32
