@@ -53,16 +53,5 @@ for imgs in dataset.take(1):
         ax[i,1].axis('off')
 plt.show()
 
-# # train vae
-# bsize = 32
-# imgs_tensor = tf.convert_to_tensor(np.random.uniform(0,1,(buffer_size,128,128,1)), dtype=tf.float32)
-# dataset = tf.data.Dataset.from_tensor_slices(imgs_tensor).batch(bsize)
-# agent.train_autoencoder(dataset, num_epochs=10)
-# # train imaginator
-# data = buf.get()
-# loss_i = agent.train_imaginator(data, 10)
-# # train actor critic
-# loss_pi, loss_v, info = agent.train_policy(data, 10)
-
-
+# train imaginator
 
