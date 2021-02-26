@@ -147,22 +147,9 @@ class VariationalAutoencoder(tf.keras.Model):
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
 
     @tf.function
-    def reparameterize(self, mean, std):
+    def reparameterize(self, mean, logstddev):
         eps = tf.random.normal(shape=mean.shape)
-        return mean + eps*std 
-
-#     @tf.function
-#     def encode(self, img):
-#         mean, logstd = self.encoder(img)
-#         return tf.squeeze(mean), tf.squeeze(logstd)
-# 
-#     @tf.function
-#     def decode(self, z, apply_sigmoid=False):
-#         logits = self.decoder(z)
-#         if apply_sigmoid:
-#             probs = tf.math.sigmoid(logits)
-#             return probs
-#         return logits
+        return mean + eps*tf.math.exp(logstddev) 
 
     def train(self, dataset, num_epochs):
 
@@ -194,32 +181,6 @@ class VariationalAutoencoder(tf.keras.Model):
             logging.info("Epoch {} ELBO: {}".format(e+1,elbo))
             elbo_per_epoch.append(elbo)
         return elbo_per_epoch
-# class VariationalAutoencoder(tf.keras.Model):
-#     """
-#     Variational autoencoder
-#     """
-#     def __init__(self, dim_view, dim_latent, **kwargs):
-#         super(VariationalAutoencoder, self).__init__(name='vae', **kwargs)
-#         self.dim_view = dim_view
-#         self.dim_latent = dim_latent
-#         # construct encoder
-#         inputs_encoder = tf.keras.Input(shape=dim_view, name='encoder_inputs')
-#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(inputs_encoder)
-#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
-#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
-#         x = tf.keras.layers.Flatten()(x)
-#         mu = tf.keras.layers.Dense(dim_latent, name='encoder_outputs_mean')(x)
-#         logsigma = tf.keras.layers.Dense(dim_latent, name='encoder_outputs_logstddev')(x)
-#         self.encoder = tf.keras.Model(inputs=inputs_encoder, outputs = [mu, logsigma])
-#         # construct decoder
-#         inputs_decoder = tf.keras.Input(shape=(dim_latent,), name='decoder_inputs')
-#         x = tf.keras.layers.Dense(units=16*16*64, activation='relu')(inputs_decoder) 
-#         x = tf.keras.layers.Reshape(target_shape=(16, 16, 64))(x)
-#         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
-#         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
-#         x = tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')(x)
-#         outputs_decoder = tf.keras.layers.Conv2DTranspose(filters=1, kernel_size=4, strides=1, padding='same', name='decoder_outputs')(x)
-#         self.decoder = tf.keras.Model(inputs=inputs_decoder, outputs=outputs_decoder)
 ################################################################
 
 ################################################################
@@ -358,8 +319,10 @@ class PPOActorCritic(tf.keras.Model):
 class DynamicsModel(tf.keras.Model):
     def __init__(self, dim_obs, dim_act, **kwargs):
         super(DynamicsModel, self).__init__(name='dynamics_model', **kwargs)
+        # params
         self.dim_obs=dim_obs
         self.dim_act=dim_act
+        # model
         inputs_obs = tf.keras.Input(shape=(dim_obs,), name='dynamics_inputs_obs')
         inputs_act = tf.keras.Input(shape=(dim_act,), name='dynamics_inputs_act')
         x = tf.keras.layers.concatenate([inputs_obs, inputs_act])
@@ -368,11 +331,40 @@ class DynamicsModel(tf.keras.Model):
         outputs_mean = tf.keras.layers.Dense(dim_obs, name='dynamics_ouputs_mean')(x)
         outputs_logstddev = tf.keras.layers.Dense(dim_obs, name='dynamics_ouputs_logstddev')(x)
         self.dynamics_net = tf.keras.Model(inputs=[inputs_obs, inputs_act], outputs=[outputs_mean, outputs_logstddev])
+        # optimizer
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
 
     @tf.function
     def call(self, obs, act):
         mean, logstddev = self.dynamics_net([obs, act])
         return tf.squeeze(mean), tf.squeeze(logstddev)
+
+    @tf.function
+    def reparameterize(self, mean, logstddev):
+        eps = tf.random.normal(shape=mean.shape)
+        return mean + eps*tf.math.exp(logstddev) 
+
+    def train(self, data, num_epoch):
+        ep_loss_dyna = []
+        for e in range(num_epochs):
+            logging.debug("Starting dynamics model training epoch: {}".format(e+1))
+            with tf.GradientTape() as tape:
+                tape.watch(self.dynamics_net.trainable_variables)
+                z_true = self.reparameterize(data['encmu'], data['encls'])
+                mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
+                z_pred = self.reparameterize(mu_pred, tf.math.exp(logsigma_pred))
+                loss_dyna = tf.keras.losses.KLD(z_true, z_pred)
+            grads_dyna = tape.gradient(loss_dyna, self.dynamics_net.trainable_variables)
+            self.optimizer.apply_gradients(zip(grads_dyna, self.dynamics_net.trainable_variables))
+            ep_loss_dyna.append(loss_dyna)
+            logging.debug("\n----Dynamics Model Training----\nEpoch :{} \nLoss: {}".format(
+                e+1,
+                loss_dyna
+            ))
+        mean_loss_dyna = tf.math.reduce_mean(ep_loss_dyna)
+        
+        return mean_loss_dyna
+
 ################################################################
 
 class IntrinsicMotivationAgent(tf.keras.Model):
