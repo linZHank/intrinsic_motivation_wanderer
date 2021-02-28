@@ -41,16 +41,20 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.ret_buf = np.zeros(shape=(max_size,), dtype=np.float32) # rewards-to-go return
         self.adv_buf = np.zeros(shape=(max_size,), dtype=np.float32) # advantage
         self.lpa_buf = np.zeros(shape=(max_size,), dtype=np.float32) # logprob(action)
+        self.mu_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # encoded mean
+        self.logsigma_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # encoded logsigma
         # variables
         self.ptr, self.path_start_idx = 0, 0
 
-    def store(self, obs, act, rew, val, lpa):
+    def store(self, obs, act, rew, val, lpa, mu, logsigma):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
         self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
         self.lpa_buf[self.ptr] = lpa
+        self.mu_buf[self.ptr] = mu
+        self.logsigma_buf[self.ptr] = logsigma
         self.ptr += 1
 
     def finish_path(self, last_val=0):
@@ -72,6 +76,8 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.ret_buf = self.ret_buf[:self.ptr] 
         self.adv_buf = self.adv_buf[:self.ptr] 
         self.lpa_buf = self.lpa_buf[:self.ptr]
+        self.mu_buf = self.mu_buf[:self.ptr]
+        self.logsigma_buf = self.logsigma_buf[:self.ptr]
         # the next three lines implement the advantage normalization trick
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
@@ -81,7 +87,9 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
             act=self.act_buf, 
             ret=self.ret_buf, 
             adv=self.adv_buf, 
-            lpa=self.lpa_buf
+            lpa=self.lpa_buf,
+            mu=self.mu_buf,
+            logsigma=self.logsigma_buf
         )
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
 ################################################################
@@ -344,16 +352,16 @@ class DynamicsModel(tf.keras.Model):
         eps = tf.random.normal(shape=mean.shape)
         return mean + eps*tf.math.exp(logstddev) 
 
-    def train(self, data, num_epoch):
+    def train(self, data, num_epochs):
         ep_loss_dyna = []
         for e in range(num_epochs):
             logging.debug("Starting dynamics model training epoch: {}".format(e+1))
             with tf.GradientTape() as tape:
                 tape.watch(self.dynamics_net.trainable_variables)
-                z_true = self.reparameterize(data['encmu'], data['encls'])
+                d_true = tfd.Normal(loc=data['mu'], scale=tf.math.exp(data['logsigma']), allow_nan_stats=False) 
                 mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
-                z_pred = self.reparameterize(mu_pred, tf.math.exp(logsigma_pred))
-                loss_dyna = tf.keras.losses.KLD(z_true, z_pred)
+                d_pred = tfd.Normal(loc=mu_pred, scale=tf.math.exp(logsigma_pred), allow_nan_stats=False)
+                loss_dyna = tf.math.reduce_mean(tfd.kl_divergence(d_true, d_pred, allow_nan_stats=False))
             grads_dyna = tape.gradient(loss_dyna, self.dynamics_net.trainable_variables)
             self.optimizer.apply_gradients(zip(grads_dyna, self.dynamics_net.trainable_variables))
             ep_loss_dyna.append(loss_dyna)
@@ -384,12 +392,12 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.imaginator = DynamicsModel(dim_latent, dim_act)
 
     @ tf.function
-    def compute_intrinsic_reward(self, imagine_mean, imagine_logstddev, latent_feature):
+    def compute_intrinsic_reward(self, mean_imagine, logstddev_imagine, latent_feature):
         """
         Less likely state results in larger reward, which simulates curiosity
         """
-        imagine_distribution = tfd.Normal(loc=imagine_mean, scale=tf.math.exp(imagine_logstddev))
-        reward = -tf.math.reduce_mean(imagine_distribution.log_prob(latent_feature), axis=-1)
+        distribution_imagine = tfd.Normal(loc=mean_imagine, scale=tf.math.exp(logstddev_imagine))
+        reward = -tf.math.reduce_mean(distribution_imagine.log_prob(latent_feature), axis=-1)
 
         return tf.squeeze(tf.clip_by_value(reward, 0, 10))
 
