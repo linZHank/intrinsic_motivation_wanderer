@@ -10,11 +10,11 @@ from agents.intrinsic_motivation_agent import IntrinsicMotivationAgent
 
 
 # Parameters
-dim_latent = 16
 dim_view = (128,128,1)
+dim_latent = 8
 dim_act = 1
 num_act = 10
-brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
+brain = IntrinsicMotivationAgent(dim_view=dim_view, dim_latent=dim_latent, num_act=num_act, dim_act=dim_act)
 seeds = ['belauensis', 'macromphalus', 'pompilius', 'scrobiculatus', 'stenomphalus'] # For memorization of the vanished pattern in front of the Rhodes Hall. Every new born agent will be given a name after a valid species in the family of Nautilidae listed in https://en.wikipedia.org/wiki/Nautilus_(genus)
 
 # Set model paths

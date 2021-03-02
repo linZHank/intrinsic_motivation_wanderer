@@ -16,11 +16,11 @@ from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivatio
 import tensorflow as tf
 
 # Parameters
-total_steps = 300
+total_steps = 1000
 dim_latent = 16
 dim_view = (128,128,1)
-dim_act = 1
 num_act = 10
+dim_act = 1
 
 # Get mecanum driver ready
 wheels = MecanumDriver() # need integrate mecdriver into agent in next version
@@ -29,24 +29,23 @@ wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
 eye.get(cv2.CAP_PROP_FPS)
 # Get agent ready
-brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
-seed = 'belauensis'
-load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-20-17-07') # typically use the last saved models
-brain.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
-brain.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
+brain = IntrinsicMotivationAgent(dim_view, dim_latent, num_act, dim_act)
+seed = 'macromphalus'
+load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-03') # typically use the last saved models
+brain.vae.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
+brain.vae.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
 brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
 brain.actor = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
 brain.critic = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
-memory = OnPolicyBuffer(dim_latent=dim_latent, dim_act=dim_act, size=total_steps, gamma=.99, lam=.97)
+memory = OnPolicyBuffer(max_size=total_steps)
 # Generate first imagination and action
 ret, frame = eye.read() # obs = env.reset()
 view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
 view.resize(1,128,128,1)
-latent_distribution = brain.encode(view) # encoded distribution
-state = latent_distribution.sample() # brain.reparameterize(latent_distribution.mean(), latent_distribution.stddev())
-act, val, logp = brain.make_decision(state) 
+obs, _ = brain.vae.encode(view) # encoded distribution
+act, val, lpa = brain.ac.make_decision(obs) 
+mu_imn, logsigma_imn = brain.imaginator(obs, np.reshape(act, (1,1))) # imagined latent state
 wheels.set_action(int(act))
-imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32)) # imagined latent state
 logging.info("\n====Ignition====\n")
 # Preapare for experience collecting
 save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
@@ -77,42 +76,29 @@ try:
         time_elapse = time.time() - start_time
         frame_counter+=1
         if int(time_elapse)-int(prev_time_elapse): # take an action every sec
-            next_view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
-            next_view.resize(1,128,128,1)
-            next_latent_distribution = brain.encode(next_view)
-            next_state = next_latent_distribution.sample() # brain.reparameterize(next_latent_distribution.mean(), next_latent_distribution.stddev()) 
-            rew = brain.compute_intrinsic_reward(imagination, next_latent_distribution)
+            view_next = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255.
+            view_next.resize(1,128,128,1)
+            mu, logsigma = brain.vae.encoder(view_next)
+            rew = brain.compute_intrinsic_reward(mu_imn, logsigma_imn, mu)
             ep_ret+=rew
             ep_len+=1
-            memory.store(
-                np.squeeze(latent_distribution.mean()), 
-                np.squeeze(latent_distribution.stddev()), 
-                np.squeeze(next_latent_distribution.mean()), 
-                np.squeeze(next_latent_distribution.stddev()), 
-                np.squeeze(state), 
-                np.squeeze(next_state), 
-                np.squeeze(imagination), 
-                act, 
-                rew, 
-                val, 
-                logp
-            )
+            memory.store(obs, act, rew, val, lpa, mu, logsigma)
             step_counter+=1
             stepwise_frames.append(frame_counter)
-            logging.info("\nepisode: {} \nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(episode_counter+1, step_counter, state, imagination, act, next_state, val, logp, rew, ep_ret, ep_len))
+            logging.debug("\nepisode: {} \nstep: {} \ncurrent state: {} \nimagination: {} \naction: {} \nnext state: {} \nvalue: {} \nlog prob: {} \nreward: {} \nepisode return: {} \nepisode length: {}".format(episode_counter+1, step_counter, obs, (mu_imn, logsigma_imn), act, (mu, logsigma), val, logp, rew, ep_ret, ep_len))
             # handle episode terminal
             if not step_counter%max_ep_len:
-                _, val, _ = brain.make_decision(state)
-                memory.finish_path(np.squeeze(val))
+                _, val, _ = brain.make_decision(obs)
+                memory.finish_path(val)
                 episode_counter+=1
                 episodic_returns.append(ep_ret)
                 logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {} \n----\n".format(frame_counter, episode_counter, ep_ret))
                 ep_ret, ep_len = 0, 0
             # compute next obs, act, val, logp
-            state = next_state # SUPER CRITICAL!!!
-            act, val, logp = brain.make_decision(state) 
+            obs = mu # SUPER CRITICAL!!!
+            act, val, logp = brain.make_decision(obs) 
             wheels.set_action(int(act))
-            imagination = brain.imagine(state, np.reshape(act, (1,1)).astype(np.float32))
+            mu_imn, logsigma_imn = brain.imaginator(obs, np.reshape(act, (1,1)))
             
     # Save valuable items
     with open(os.path.join(save_dir, 'elapsed_time.txt'), 'w') as f:
