@@ -6,37 +6,44 @@ import sys
 import os
 import time
 import numpy as np
+import tensorflow as tf
 import cv2
 from datetime import datetime
 import logging
-logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
+logging.basicConfig(format='%(asctime)s %(message)s',level=logging.DEBUG)
 
 from drivers.mecanum_driver import MecanumDriver
-from agents.intrinsic_motivation_agent import OnPolicyBuffer, IntrinsicMotivationAgent
-import tensorflow as tf
+from agents.ima_macromphalus import OnPolicyBuffer, IntrinsicMotivationAgent
 
 # Parameters
-total_steps = 1000
 dim_latent = 16
 dim_view = (128,128,1)
 num_act = 10
 dim_act = 1
+total_steps = 100
 
-# Get mecanum driver ready
-wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 # Get camera ready
 # eye = cv2.VideoCapture(0) # usb webcam for debugging
 eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
 eye.get(cv2.CAP_PROP_FPS)
+image_dir = os.path.join('/ssd', version+'_experience', datetime.now().strftime("%Y-%m-%d-%H-%M"), 'views')
+if not os.path.exists(image_dir):
+    try:
+        os.makedirs(image_dir)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+# Get mecanum driver ready
+wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 # Get agent ready
 brain = IntrinsicMotivationAgent(dim_view, dim_latent, num_act, dim_act)
-seed = 'macromphalus'
-load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-03') # typically use the last saved models
-brain.vae.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
-brain.vae.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
-brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
-brain.actor = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
-brain.critic = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
+version = 'macromphalus'
+load_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-03') # typically use the last saved models
+brain.vae.encoder.encoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
+brain.vae.decoder.decoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
+brain.imaginator.dynamics_net = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
+brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
+brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 memory = OnPolicyBuffer(max_size=total_steps)
 # Generate first imagination and action
 ret, frame = eye.read() # obs = env.reset()
@@ -44,19 +51,11 @@ view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
 view.resize(1,128,128,1)
 obs, _ = brain.vae.encode(view) # encoded distribution
 act, val, lpa = brain.ac.make_decision(obs) 
-mu_imn, logsigma_imn = brain.imaginator(obs, np.reshape(act, (1,1))) # imagined latent state
+mu_imn, logsigma_imn = brain.imaginator(obs, tf.reshape(act, (1,1))) # imagined latent state
 wheels.set_action(int(act))
-logging.info("\n====Ignition====\n")
+logging.info("\n====Get Ready====\n")
 # Preapare for experience collecting
-save_dir = '/ssd/mecanum_experience/' + datetime.now().strftime("%Y-%m-%d-%H-%M") + '/'
-views_dir = save_dir+'views'
-if not os.path.exists(views_dir):
-    try:
-        os.makedirs(views_dir)
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise
-max_ep_len = 10
+max_ep_len = 20
 ep_ret, ep_len = 0, 0
 frame_counter = 0
 episode_counter = 0
@@ -71,7 +70,7 @@ start_time = time.time()
 try:
     while step_counter < total_steps:
         ret, frame = eye.read()
-        cv2.imwrite(os.path.join(views_dir, str(frame_counter)+'.jpg'), frame)
+        cv2.imwrite(os.path.join(image_dir, str(frame_counter)+'.jpg'), frame)
         prev_time_elapse = time_elapse
         time_elapse = time.time() - start_time
         frame_counter+=1
@@ -95,7 +94,7 @@ try:
                 logging.info("\n----\nTotalFrames: {} \nEpisode: {}, EpReturn: {} \n----\n".format(frame_counter, episode_counter, ep_ret))
                 ep_ret, ep_len = 0, 0
             # compute next obs, act, val, logp
-            obs = mu # SUPER CRITICAL!!!
+            obs = mu.copy() # SUPER CRITICAL!!!
             act, val, logp = brain.make_decision(obs) 
             wheels.set_action(int(act))
             mu_imn, logsigma_imn = brain.imaginator(obs, np.reshape(act, (1,1)))
