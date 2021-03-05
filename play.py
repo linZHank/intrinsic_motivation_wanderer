@@ -99,7 +99,6 @@ try:
             act, val, lpa = brain.ac.make_decision(tf.expand_dims(obs,0)) 
             wheels.set_action(int(act))
             mu_imn, logsigma_imn = brain.imaginator(tf.expand_dims(obs,0), np.reshape(act, (1,1)))
-            
     # Save valuable items
     with open(os.path.join(os.path.dirname(model_dir), 'elapsed_time.txt'), 'w') as f:
         f.write("{}".format(time.time()-start_time))
