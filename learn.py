@@ -16,29 +16,29 @@ import logging
 logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
 # Parameters
-dim_latent = 16
 dim_view = (128,128,1)
-dim_act = 1
+dim_latent = 8
 num_act = 10
-seed = 'belauensis'
+dim_act = 1
+version = 'macromphalus'
 num_epochs = 100
-batch_size = 32
+batch_size = 64
 
 # Load agent
-brain = IntrinsicMotivationAgent(dim_latent=dim_latent, dim_view=dim_view, dim_act=dim_act, num_act=num_act)
-load_dir = os.path.join(sys.path[0], 'model_dir', seed, '2021-01-20-16-53')
-brain.encoder = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
-brain.decoder = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
-brain.imaginator = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
-brain.actor = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
-brain.critic = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
+brain = IntrinsicMotivationAgent(dim_view, dim_latent, num_act, dim_act)
+model_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-03-09-17-29')
+brain.vae.encoder.encoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
+brain.vae.decoder.decoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
+brain.imaginator.dynamics_net = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
+brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(load_dir, 'actor'))
+brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 
 # Load data
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07/'
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-03-09-17-29/'
 dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
     data_dir,
     color_mode='grayscale',
-    image_size=(128, 128),
+    image_size=dim_view[:2],
     batch_size=batch_size
 )
 dataset_views = dataset_views.map(lambda x, y: x/255.)
