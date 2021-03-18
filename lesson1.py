@@ -42,17 +42,20 @@ dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
 dataset_views = dataset_views.map(lambda x, y: x/255.)
 
 # train vae
-# loss_elbo = brain.vae.train(dataset_views, num_epochs=20)
+loss_elbo = brain.vae.train(dataset=dataset_views, num_epochs=20)
 
 # train imaginator
-view_paths = [os.path.join(data_dir, 'views/0.jpg')]
-vi = np.load(os.path.join(data_dir, 'stepwise_frames.npy'))
-for i in vi:
-    view_paths.append(os.path.join(data_dir, 'views', str(i)+'.jpg'))
-# data = dict(
-#     obs=self.obs_buf, 
-#     act=self.act_buf, 
-#     mu=self.mu_buf,
-#     logsigma=self.logsigma_buf
-# )
-# {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
+actions = np.load(os.path.join(data_dir, 'action_data.npy'))
+frames = np.load(os.path.join(data_dir, 'stepwise_frames.npy'))
+views = np.zeros([frames.shape[0]+1]+list(dim_view))
+views[0] = np.expand_dims(cv2.imread(os.path.join(data_dir, 'views/0.jpg'), 0), -1)
+for i, f in enumerate(frames):
+    views[i+1] = np.expand_dims(cv2.imread(os.path.join(data_dir, 'views', str(f)+'.jpg'), 0), -1)
+obs, _ = brain.vae.encoder(views[:-1])
+mu, logsigma = brain.vae.encoder(views)
+data = dict(
+    obs=mu[:-1],
+    act=tf.convert_to_tensor(actions),
+    nobs=mu[1:] 
+)
+loss_dyna = brain.imaginator.train(data=data, num_epochs=100)
