@@ -358,13 +358,17 @@ class DynamicsModel(tf.keras.Model):
             logging.debug("Starting dynamics model training epoch: {}".format(e+1))
             with tf.GradientTape() as tape:
                 tape.watch(self.dynamics_net.trainable_variables)
-                # d_true = tfd.Normal(loc=data['mu'], scale=tf.math.exp(data['logsigma']), allow_nan_stats=False) 
-                # mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
-                # d_pred = tfd.Normal(loc=mu_pred, scale=tf.math.exp(logsigma_pred), allow_nan_stats=False)
-                # loss_dyna = tf.math.reduce_sum(tfd.kl_divergence(d_pred, d_true, allow_nan_stats=False))
+                d_true = tfd.Normal(loc=data['nmu'], scale=tf.math.exp(data['nlogsigma']), allow_nan_stats=False) 
                 mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
                 d_pred = tfd.Normal(loc=mu_pred, scale=tf.math.exp(logsigma_pred), allow_nan_stats=False)
-                loss_dyna = -tf.math.reduce_mean(d_pred.log_prob(data['nobs']), axis=-1)
+                z = self.reparameterize(data['nmu'], data['nlogsigma'])
+                prob_true = tf.clip_by_value(d_true.prob(z), 1e-7, 1)
+                prob_pred = tf.clip_by_value(d_pred.prob(z), 1e-7, 1)
+                loss_dyna = tf.math.reduce_sum(tf.keras.losses.KLD(prob_true, prob_pred))
+                # loss_dyna = tf.math.reduce_sum(tfd.kl_divergence(d_pred, d_true, allow_nan_stats=False))
+                # mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
+                # d_pred = tfd.Normal(loc=mu_pred, scale=tf.math.exp(logsigma_pred), allow_nan_stats=False)
+                # loss_dyna = -tf.math.reduce_mean(d_pred.log_prob(data['nobs']), axis=-1)
             grads_dyna = tape.gradient(loss_dyna, self.dynamics_net.trainable_variables)
             self.optimizer.apply_gradients(zip(grads_dyna, self.dynamics_net.trainable_variables))
             ep_loss_dyna.append(loss_dyna)
@@ -400,7 +404,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         Less likely state results in larger reward, which simulates curiosity
         """
         distribution_imagine = tfd.Normal(loc=mean_imagine, scale=tf.math.exp(logstddev_imagine))
-        reward = -tf.math.reduce_mean(distribution_imagine.log_prob(latent_feature), axis=-1)
+        reward = -tf.math.reduce_mean(distribution_imagine.prob(latent_feature), axis=-1)
 
         return tf.squeeze(reward)
 
