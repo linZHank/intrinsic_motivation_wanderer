@@ -9,7 +9,7 @@ tfd = tfp.distributions
 import logging
 logging.basicConfig(format='%(asctime)s %(message)s',level=logging.DEBUG)
 
-################################################################
+################ Replay Buffer ################
 """
 On-policy Replay Buffer 
 """
@@ -41,20 +41,30 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.ret_buf = np.zeros(shape=(max_size,), dtype=np.float32) # rewards-to-go return
         self.adv_buf = np.zeros(shape=(max_size,), dtype=np.float32) # advantage
         self.lpa_buf = np.zeros(shape=(max_size,), dtype=np.float32) # logprob(action)
+        self.nobs_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # state, default dtype=tf.float32
         self.mu_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # encoded mean
-        self.logsigma_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # encoded logsigma
+        self.lsig_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # encoded log(sigma)
+        self.nmu_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # next encoded mean
+        self.nlsig_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # next encoded log(stddev)
+        self.imu_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # imagined mean
+        self.ilsig_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # imagined log(stddev)
         # variables
         self.ptr, self.path_start_idx = 0, 0
 
-    def store(self, obs, act, rew, val, lpa, mu, logsigma):
+    def store(self, obs, act, rew, val, lpa, nobs, mu, lsig, nmu, nlsig, imu, ilsig):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
         self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
         self.lpa_buf[self.ptr] = lpa
+        self.nobs_buf[self.ptr] = nobs
         self.mu_buf[self.ptr] = mu
-        self.logsigma_buf[self.ptr] = logsigma
+        self.lsig_buf[self.ptr] = lsig
+        self.nmu_buf[self.ptr] = nmu
+        self.nlsig_buf[self.ptr] = nlsig
+        self.imu_buf[self.ptr] = imu
+        self.ilsig_buf[self.ptr] = ilsig
         self.ptr += 1
 
     def finish_path(self, last_val=0):
@@ -76,8 +86,13 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.ret_buf = self.ret_buf[:self.ptr] 
         self.adv_buf = self.adv_buf[:self.ptr] 
         self.lpa_buf = self.lpa_buf[:self.ptr]
+        self.nobs_buf = self.nobs_buf[:self.ptr] 
         self.mu_buf = self.mu_buf[:self.ptr]
-        self.logsigma_buf = self.logsigma_buf[:self.ptr]
+        self.lsig_buf = self.lsig_buf[:self.ptr]
+        self.nmu_buf = self.nmu_buf[:self.ptr]
+        self.nlsig_buf = self.nlsig_buf[:self.ptr]
+        self.imu_buf = self.imu_buf[:self.ptr]
+        self.ilsig_buf = self.ilsig_buf[:self.ptr]
         # the next three lines implement the advantage normalization trick
         adv_mean = np.mean(self.adv_buf)
         adv_std = np.std(self.adv_buf)
@@ -88,13 +103,18 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
             ret=self.ret_buf, 
             adv=self.adv_buf, 
             lpa=self.lpa_buf,
+            nobs=self.nobs_buf,
             mu=self.mu_buf,
-            logsigma=self.logsigma_buf
+            lsig=self.lsig_buf,
+            nmu=self.nmu_buf,
+            nlsig=self.nlsig_buf,
+            imu=self.imu_buf,
+            ilsig=self.ilsig_buf
         )
         return {k: tf.convert_to_tensor(v, dtype=tf.float32) for k,v in data.items()}
-################################################################
+################ Replay Buffer ################
 
-################################################################
+################ VAE ################
 class Encoder(tf.keras.Model):
     def __init__(self, dim_origin, dim_latent, **kwargs):
         super(Encoder, self).__init__(name='encoder', **kwargs)
@@ -189,9 +209,9 @@ class VariationalAutoencoder(tf.keras.Model):
             logging.info("Epoch {} ELBO: {}".format(e+1,elbo))
             elbo_per_epoch.append(elbo)
         return elbo_per_epoch
-################################################################
+################ VAE ################
 
-################################################################
+################ PPO ################
 class CategoricalActor(tf.keras.Model):
 
     def __init__(self, dim_obs, num_act, **kwargs):
@@ -321,9 +341,9 @@ class PPOActorCritic(tf.keras.Model):
         mean_loss_val = tf.math.reduce_mean(ep_loss_val)
 
         return mean_loss_pi, mean_loss_val, dict(kld=mean_kld, entropy=mean_ent)
-################################################################
+################ PPO ################
 
-################################################################
+################ Dynamics Model ################
 class DynamicsModel(tf.keras.Model):
     def __init__(self, dim_obs, dim_act, **kwargs):
         super(DynamicsModel, self).__init__(name='dynamics_model', **kwargs)
@@ -347,10 +367,10 @@ class DynamicsModel(tf.keras.Model):
         mean, logstddev = self.dynamics_net([obs, act])
         return tf.squeeze(mean), tf.squeeze(logstddev)
 
-    # @tf.function
-    # def reparameterize(self, mean, logstddev):
-    #     eps = tf.random.normal(shape=mean.shape)
-    #     return mean + eps*tf.math.exp(logstddev) 
+    @tf.function
+    def reparameterize(self, mean, logstddev):
+        eps = tf.random.normal(shape=mean.shape)
+        return mean + eps*tf.math.exp(logstddev) 
 
     def train(self, data, num_epochs):
         ep_loss_dyna = []
@@ -358,12 +378,11 @@ class DynamicsModel(tf.keras.Model):
             logging.debug("Starting dynamics model training epoch: {}".format(e+1))
             with tf.GradientTape() as tape:
                 tape.watch(self.dynamics_net.trainable_variables)
-                d_true = tfd.Normal(loc=data['nmu'], scale=tf.math.exp(data['nlogsigma']), allow_nan_stats=False) 
+                d_true = tfd.Normal(loc=data['nmu'], scale=tf.math.exp(data['nlsig']), allow_nan_stats=False) 
                 mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
                 d_pred = tfd.Normal(loc=mu_pred, scale=tf.math.exp(logsigma_pred), allow_nan_stats=False)
-                z = self.reparameterize(data['nmu'], data['nlogsigma'])
-                prob_true = tf.clip_by_value(d_true.prob(z), 1e-7, 1)
-                prob_pred = tf.clip_by_value(d_pred.prob(z), 1e-7, 1)
+                prob_true = tf.clip_by_value(d_true.prob(data['nobs']), 1e-7, 1)
+                prob_pred = tf.clip_by_value(d_pred.prob(data['nobs']), 1e-7, 1)
                 loss_dyna = tf.math.reduce_sum(tf.keras.losses.KLD(prob_true, prob_pred))
                 # loss_dyna = tf.math.reduce_sum(tfd.kl_divergence(d_pred, d_true, allow_nan_stats=False))
                 # mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
@@ -379,8 +398,7 @@ class DynamicsModel(tf.keras.Model):
         mean_loss_dyna = tf.math.reduce_mean(ep_loss_dyna)
         
         return mean_loss_dyna
-
-################################################################
+################ Dynamics Model ################
 
 class IntrinsicMotivationAgent(tf.keras.Model):
     def __init__(self, dim_view=(128,128,1), dim_latent=8, num_act=10, dim_act=1, clip_ratio=0.2, beta=0., target_kld=0.1, **kwargs):
@@ -398,7 +416,7 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.ac = PPOActorCritic(dim_obs=dim_latent, num_act=num_act, dim_act=dim_act, clip_ratio=clip_ratio, beta=beta, target_kld=target_kld)
         self.imaginator = DynamicsModel(dim_latent, dim_act)
 
-    @ tf.function
+    @tf.function
     def compute_intrinsic_reward(self, mean_imagine, logstddev_imagine, latent_feature):
         """
         Less likely state results in larger reward, which simulates curiosity

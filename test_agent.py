@@ -10,39 +10,44 @@ logging.basicConfig(format='%(asctime)s %(message)s',level=logging.DEBUG)
 
 from agents.ima_macromphalus import IntrinsicMotivationAgent, OnPolicyBuffer
 
-agent = IntrinsicMotivationAgent()
-buf = OnPolicyBuffer(max_size=100)
- 
 img_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-03-05-17-42/views'
 img_files = os.listdir(img_dir)
+agent = IntrinsicMotivationAgent()
+buf = OnPolicyBuffer(max_size=1000)
+ 
 # collect experience
 # i = np.random.uniform(0,1,(1,128,128,1))
 img = cv2.imread(os.path.join(img_dir, '0.jpg'), 0)/255.
 img.resize(1,128,128,1)
 mu, logsigma = agent.vae.encoder(img)
-a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
-mu_, logsigma_ = agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
-o_ = agent.vae.reparameterize(mu_, logsigma_)
-for i in range(1, len(img_files)):
-    o = agent.vae.reparameterize(mu, logsigma)
-    mu_, logsigma_= agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
-    # o_ = agent.vae.reparameterize(mu_, logsigma_)
-    # nimg = np.random.uniform(0,1,(1,128,128,1))
-    nimg = cv2.imread(os.path.join(img_dir, str(i)+'.jpg'), 0)/255.
-    nimg.resize(1,128,128,1)
-    nmu, nlogsigma = agent.vae.encoder(nimg)
-    r = agent.compute_intrinsic_reward(nmu, nlogsigma)
+o = agent.vae.reparameterize(mu, logsigma)
+for i in range(1000):
+    a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
+    img2 = cv2.imread(os.path.join(img_dir, str(i+1)+'.jpg'), 0)/255.
+    img2.resize(1,128,128,1)
+    mu2, logsigma2 = agent.vae.encoder(img2)
+    o2 = agent.vae.reparameterize(mu2, logsigma2)
+    mu2_, logsigma2_= agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
+    o2_ = agent.vae.reparameterize(mu2_, logsigma2_)
+    r = agent.compute_intrinsic_reward(mu2_, logsigma2_, o2)
+    logging.debug('act: {}, val: {}, lpa: {}, rew: {}'.format(a,v,l,r))
     buf.store(
         o, 
         a, 
         r, 
         v, 
         l, 
+        o2,
         mu,
-        ls
+        logsigma,
+        mu2,
+        logsigma2,
+        mu2_,
+        logsigma2_,
     )
-    o = mu
-    a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
+    mu = mu2
+    logsigma = logsigma2
+    o = o2
 _, v, _ = agent.ac.make_decision(tf.expand_dims(o,0))
 buf.finish_path(v)
 
@@ -50,8 +55,7 @@ buf.finish_path(v)
 data = buf.get()
 loss_pi, loss_val, loss_info = agent.ac.train(data, 80)
 # train_vae
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-17-07'
-dataset = tf.keras.preprocessing.image_dataset_from_directory(data_dir, color_mode='grayscale', image_size=(128,128), batch_size=128)
+dataset = tf.keras.preprocessing.image_dataset_from_directory(os.path.dirname(img_dir), color_mode='grayscale', image_size=(128,128), batch_size=128)
 dataset = dataset.map(lambda x, y: x/255.)
 loss_elbo = agent.vae.train(dataset, num_epochs=20)
 

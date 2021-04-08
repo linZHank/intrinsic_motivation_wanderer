@@ -22,7 +22,7 @@ dim_view = (128,128,1)
 dim_latent = 8
 num_act = 10
 dim_act = 1
-total_steps = 900
+total_steps = 300
 time_stamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
 # Instantiate camera, motor driver, agent
 eye = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int)128, height=(int)128, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER)
