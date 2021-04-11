@@ -42,6 +42,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.adv_buf = np.zeros(shape=(max_size,), dtype=np.float32) # advantage
         self.lpa_buf = np.zeros(shape=(max_size,), dtype=np.float32) # logprob(action)
         self.nobs_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # state, default dtype=tf.float32
+        self.iobs_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # state, default dtype=tf.float32
         self.mu_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # encoded mean
         self.lsig_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # encoded log(sigma)
         self.nmu_buf = np.zeros(shape=(max_size, dim_obs), dtype=np.float32) # next encoded mean
@@ -51,7 +52,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         # variables
         self.ptr, self.path_start_idx = 0, 0
 
-    def store(self, obs, act, rew, val, lpa, nobs, mu, lsig, nmu, nlsig, imu, ilsig):
+    def store(self, obs, act, rew, val, lpa, nobs, iobs, mu, lsig, nmu, nlsig, imu, ilsig):
         assert self.ptr <= self.max_size     # buffer has to have room so you can store
         self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
@@ -59,6 +60,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.val_buf[self.ptr] = val
         self.lpa_buf[self.ptr] = lpa
         self.nobs_buf[self.ptr] = nobs
+        self.iobs_buf[self.ptr] = iobs
         self.mu_buf[self.ptr] = mu
         self.lsig_buf[self.ptr] = lsig
         self.nmu_buf[self.ptr] = nmu
@@ -87,6 +89,7 @@ class OnPolicyBuffer: # To save memory, no image will be saved.
         self.adv_buf = self.adv_buf[:self.ptr] 
         self.lpa_buf = self.lpa_buf[:self.ptr]
         self.nobs_buf = self.nobs_buf[:self.ptr] 
+        self.iobs_buf = self.iobs_buf[:self.ptr] 
         self.mu_buf = self.mu_buf[:self.ptr]
         self.lsig_buf = self.lsig_buf[:self.ptr]
         self.nmu_buf = self.nmu_buf[:self.ptr]
@@ -367,10 +370,10 @@ class DynamicsModel(tf.keras.Model):
         mean, logstddev = self.dynamics_net([obs, act])
         return tf.squeeze(mean), tf.squeeze(logstddev)
 
-    @tf.function
-    def reparameterize(self, mean, logstddev):
-        eps = tf.random.normal(shape=mean.shape)
-        return mean + eps*tf.math.exp(logstddev) 
+    # @tf.function
+    # def reparameterize(self, mean, logstddev):
+    #     eps = tf.random.normal(shape=mean.shape)
+    #     return mean + eps*tf.math.exp(logstddev) 
 
     def train(self, data, num_epochs):
         ep_loss_dyna = []
@@ -417,12 +420,12 @@ class IntrinsicMotivationAgent(tf.keras.Model):
         self.imaginator = DynamicsModel(dim_latent, dim_act)
 
     @tf.function
-    def compute_intrinsic_reward(self, mean_imagine, logstddev_imagine, latent_feature):
+    def compute_intrinsic_reward(self, mean, logstddev, instance):
         """
         Less likely state results in larger reward, which simulates curiosity
         """
-        distribution_imagine = tfd.Normal(loc=mean_imagine, scale=tf.math.exp(logstddev_imagine))
-        reward = -tf.math.reduce_mean(distribution_imagine.prob(latent_feature), axis=-1)
+        distr = tfd.Normal(loc=mean, scale=tf.math.exp(logstddev))
+        reward = -tf.math.reduce_mean(distr.prob(instance), axis=-1)
 
         return tf.squeeze(reward)
 

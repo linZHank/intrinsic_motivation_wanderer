@@ -13,23 +13,23 @@ from agents.ima_macromphalus import IntrinsicMotivationAgent, OnPolicyBuffer
 img_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-03-05-17-42/views'
 img_files = os.listdir(img_dir)
 agent = IntrinsicMotivationAgent()
-buf = OnPolicyBuffer(max_size=1000)
+buf = OnPolicyBuffer(max_size=100)
  
 # collect experience
 # i = np.random.uniform(0,1,(1,128,128,1))
 img = cv2.imread(os.path.join(img_dir, '0.jpg'), 0)/255.
 img.resize(1,128,128,1)
-mu, logsigma = agent.vae.encoder(img)
-o = agent.vae.reparameterize(mu, logsigma)
-for i in range(1000):
-    a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
-    img2 = cv2.imread(os.path.join(img_dir, str(i+1)+'.jpg'), 0)/255.
+mu, ls = agent.vae.encoder(img)
+o = agent.vae.reparameterize(mu, ls)
+a, v, l = agent.ac.make_decision(tf.expand_dims(o,0))
+mu2_, ls2_= agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
+o2_ = agent.vae.reparameterize(mu2_, ls2_)
+for i in range(100):
+    img2 = cv2.imread(os.path.join(img_dir, str((i+1)*30)+'.jpg'), 0)/255.
     img2.resize(1,128,128,1)
-    mu2, logsigma2 = agent.vae.encoder(img2)
-    o2 = agent.vae.reparameterize(mu2, logsigma2)
-    mu2_, logsigma2_= agent.imaginator(tf.expand_dims(o,0), tf.reshape(a,(1,1)))
-    o2_ = agent.vae.reparameterize(mu2_, logsigma2_)
-    r = agent.compute_intrinsic_reward(mu2_, logsigma2_, o2)
+    mu2, ls2 = agent.vae.encoder(img2)
+    o2 = agent.vae.reparameterize(mu2, ls2)
+    r = agent.compute_intrinsic_reward(mu2, ls2, o2_)
     logging.debug('act: {}, val: {}, lpa: {}, rew: {}'.format(a,v,l,r))
     buf.store(
         o, 
@@ -38,16 +38,17 @@ for i in range(1000):
         v, 
         l, 
         o2,
+        o2_,
         mu,
-        logsigma,
+        ls,
         mu2,
-        logsigma2,
+        ls2,
         mu2_,
-        logsigma2_,
+        ls2_,
     )
-    mu = mu2
-    logsigma = logsigma2
     o = o2
+    mu = mu2
+    ls = ls2
 _, v, _ = agent.ac.make_decision(tf.expand_dims(o,0))
 buf.finish_path(v)
 
