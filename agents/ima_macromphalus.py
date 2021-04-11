@@ -386,7 +386,7 @@ class DynamicsModel(tf.keras.Model):
                 d_pred = tfd.Normal(loc=mu_pred, scale=tf.math.exp(logsigma_pred), allow_nan_stats=False)
                 prob_true = tf.clip_by_value(d_true.prob(data['nobs']), 1e-7, 1)
                 prob_pred = tf.clip_by_value(d_pred.prob(data['nobs']), 1e-7, 1)
-                loss_dyna = tf.math.reduce_sum(tf.keras.losses.KLD(prob_true, prob_pred))
+                loss_dyna = tf.math.reduce_sum(tf.keras.losses.MSE(prob_true, prob_pred))
                 # loss_dyna = tf.math.reduce_sum(tfd.kl_divergence(d_pred, d_true, allow_nan_stats=False))
                 # mu_pred, logsigma_pred = self.call(data['obs'], data['act'])
                 # d_pred = tfd.Normal(loc=mu_pred, scale=tf.math.exp(logsigma_pred), allow_nan_stats=False)
