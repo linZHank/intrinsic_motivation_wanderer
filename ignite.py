@@ -53,7 +53,7 @@ mu, logsigma = brain.vae.encoder(img)
 obs = brain.vae.reparameterize(mu, logsigma)
 act = np.random.randint(low=0, high=num_act)
 imn_mu, imn_logsigma = brain.imaginator(tf.expand_dims(obs,0), tf.reshape(act,(1,1)))
-imn_obs = brain.imaginator.reparameterize(imn_mu, imn_logsigma)
+imn_obs = brain.vae.reparameterize(imn_mu, imn_logsigma)
 wheels.set_action(act)
 try:
     while step_counter < total_steps:
@@ -86,10 +86,12 @@ except KeyboardInterrupt:
     cv2.destroyAllWindows()
     wheels.halt()
     exit()
+
 # Save valuable items
 with open(os.path.join(os.path.dirname(image_dir), 'elapsed_time.txt'), 'w') as f:
     f.write("{}".format(time.time()-start_time))
-np.save(os.path.join(os.path.dirname(image_dir), 'action_data.npy'), action_data)
+replay_data = memory.get()
+np.save(os.path.join(os.path.dirname(image_dir), 'replay_data.npy'), replay_data)
 np.save(os.path.join(os.path.dirname(image_dir), 'stepwise_frames.npy'), stepwise_frames)
 # When everything done, release the capture and stop motors
 eye.release()
