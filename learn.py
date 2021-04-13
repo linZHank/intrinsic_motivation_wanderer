@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import tensorflow as tf
 
-from agents.intrinsic_motivation_agent import IntrinsicMotivationAgent
+from agents.ima_macromphalus import IntrinsicMotivationAgent
 
 import logging
 logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
@@ -21,12 +21,12 @@ dim_latent = 8
 num_act = 10
 dim_act = 1
 version = 'macromphalus'
-num_epochs = 100
-batch_size = 64
+# num_epochs = 100
+# batch_size = 64
 
 # Load agent
-brain = IntrinsicMotivationAgent(dim_view, dim_latent, num_act, dim_act)
-model_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-03-09-17-29')
+load_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-04-13-14-22')
+brain = IntrinsicMotivationAgent(dim_view=dim_view, dim_latent=dim_latent, num_act=num_act, dim_act=dim_act)
 brain.vae.encoder.encoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
 brain.vae.decoder.decoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
 brain.imaginator.dynamics_net = tf.keras.models.load_model(os.path.join(load_dir, 'imaginator'))
@@ -34,43 +34,68 @@ brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(load_dir, 'a
 brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 
 # Load data
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-03-09-17-29/'
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-13-14-22'
 dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
     data_dir,
     color_mode='grayscale',
     image_size=dim_view[:2],
-    batch_size=batch_size
+    batch_size=64
 )
 dataset_views = dataset_views.map(lambda x, y: x/255.)
-replay_data = np.load(data_dir+'replay_data.npy', allow_pickle=True).item()
-
-# train autoencoder
-loss_elbo = brain.train_autoencoder(dataset_views, num_epochs=int(num_epochs/5))
-
-# train imaginator
-loss_i = brain.train_imaginator(replay_data, num_epochs=num_epochs)
+replay_data = np.load(os.path.join(data_dir, 'replay_data.npy'), allow_pickle=True).item()
 
 # Train policy
-loss_pi, loss_v, loss_info = brain.train_policy(replay_data, num_epochs=num_epochs)
+train_ac = input('Train actor-critic? [y/n]')
+if train_ac=='y':
+    loss_pi, loss_val, loss_info = brain.ac.train(replay_data, num_epochs=20)
+else:
+    loss_pi, loss_val = 0, 0
+# train autoencoder
+loss_vae = brain.vae.train(dataset_views, num_epochs=20)
+# train imaginator
+loss_imn = brain.imaginator.train(replay_data, num_epochs=20)
+
 
 # Save models
-save_dir = os.path.join(sys.path[0], 'model_dir', seed, data_dir.split('/')[-2]) 
+save_dir = os.path.join(sys.path[0], 'model_dir', version, datetime.now().strftime("%Y-%m-%d-%H-%M")) 
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
-brain.encoder.save(os.path.join(save_dir, 'encoder'))
-brain.decoder.save(os.path.join(save_dir, 'decoder'))
-brain.imaginator.save(os.path.join(save_dir, 'imaginator'))
-brain.actor.save(os.path.join(save_dir, 'actor'))
-brain.critic.save(os.path.join(save_dir, 'critic'))
+brain.vae.encoder.encoder_net.save(os.path.join(save_dir, 'encoder'))
+brain.vae.decoder.decoder_net.save(os.path.join(save_dir, 'decoder'))
+brain.imaginator.dynamics_net.save(os.path.join(save_dir, 'imaginator'))
+brain.ac.actor.policy_net.save(os.path.join(save_dir, 'actor'))
+brain.ac.critic.value_net.save(os.path.join(save_dir, 'critic'))
+# save losses
+np.save(os.path.join(save_dir, 'loss_pi.npy'), loss_pi)
+np.save(os.path.join(save_dir, 'loss_val.npy'), loss_val)
+np.save(os.path.join(save_dir, 'loss_vae.npy'), loss_vae)
+np.save(os.path.join(save_dir, 'loss_imn.npy'), loss_imn)
+# save sample figures
+fig, ax = plt.subplots(figsize=(10,20), nrows=10, ncols=3)
+for img in dataset_views.take(1):
+    mu, logsigma = brain.vae.encoder(img)
+    sample = brain.vae.reparameterize(mu, logsigma)
+    rec_mean = brain.vae.decoder(mu) 
+    rec_sample = brain.vae.decoder(sample) 
+    for i in range(10):
+        ax[i,0].imshow(img[i,:,:,0], cmap='gray')
+        ax[i,0].axis('off')
+        ax[i,1].imshow(rec_mean[i,:,:,0], cmap='gray')
+        ax[i,1].axis('off')
+        ax[i,2].imshow(rec_sample[i,:,:,0], cmap='gray')
+        ax[i,2].axis('off')
+plt.tight_layout()
+plt.savefig(os.path.join(save_dir, 'samples.png'))
 
 # Plot episode return
-prevdata_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/experience/2021-01-20-16-53/'
-if not prevdata_dir==data_dir:
-    prev_eprets = np.load(os.path.join(prevdata_dir, 'combined_episodic_returns.npy'))
-    eprets = np.load(os.path.join(data_dir, 'episodic_returns.npy'))
-    combined_episodic_returns = np.concatenate((prev_eprets, eprets))
-    np.save(os.path.join(data_dir, 'combined_episodic_returns.npy'), combined_episodic_returns)
-    plt.plot(combined_episodic_returns)
+data_dir0 = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-13-14-22'
+if not data_dir0==data_dir:
+    acc_returns = np.load(os.path.join(data_dir0, 'acc_returns.npy'))
+    curr_return = np.load(os.path.join(data_dir, 'return.npy'))
+    acc_returns = np.concatenate((acc_returns, curr_return))
+    np.save(os.path.join(data_dir, 'acc_returns.npy'), acc_returns)
+    plt.clf()
+    plt.plot(acc_returns)
     plt.show()
 
 
