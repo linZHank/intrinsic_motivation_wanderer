@@ -49,7 +49,7 @@ start_time = time.time()
 ret, frame = eye.read()
 view = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)/255. # from 0~255 to 0~1
 view.resize(1,128,128,1)
-mu, logsigma = brain.vae.encoder(img)
+mu, logsigma = brain.vae.encoder(view)
 obs = brain.vae.reparameterize(mu, logsigma)
 act = np.random.randint(low=0, high=num_act)
 imn_mu, imn_logsigma = brain.imaginator(tf.expand_dims(obs,0), tf.reshape(act,(1,1)))
@@ -78,7 +78,7 @@ try:
             logsigma = nxt_logsigma
             act = np.random.randint(low=0, high=num_act)
             imn_mu, imn_logsigma = brain.imaginator(tf.expand_dims(obs,0), tf.reshape(act,(1,1)))
-            imn_obs = brain.imaginator.reparameterize(imn_mu, imn_logsigma)
+            imn_obs = brain.vae.reparameterize(imn_mu, imn_logsigma)
             wheels.set_action(act)
 except KeyboardInterrupt:    
     print("\r\nctrl + c:")
@@ -92,7 +92,7 @@ with open(os.path.join(os.path.dirname(image_dir), 'elapsed_time.txt'), 'w') as 
     f.write("{}".format(time.time()-start_time))
 replay_data = memory.get()
 np.save(os.path.join(os.path.dirname(image_dir), 'replay_data.npy'), replay_data)
-np.save(os.path.join(os.path.dirname(image_dir), 'stepwise_frames.npy'), stepwise_frames)
+np.save(os.path.join(os.path.dirname(image_dir), 'stepwise_frame_ids.npy'), stepwise_frame_ids)
 # When everything done, release the capture and stop motors
 eye.release()
 cv2.destroyAllWindows()
