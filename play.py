@@ -98,6 +98,9 @@ except KeyboardInterrupt:
     cv2.destroyAllWindows()
     wheels.halt()
     exit()
+# Finish memory
+_, val, _ = brain.make_decision(tf.expand_dims(obs,0))
+memory.finish_path(val)
 
 # Save valuable items
 with open(os.path.join(os.path.dirname(image_dir), 'elapsed_time.txt'), 'w') as f:
