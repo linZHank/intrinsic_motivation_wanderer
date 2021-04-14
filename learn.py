@@ -34,7 +34,7 @@ brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(load_dir, 'a
 brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 
 # Load data
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-14-12-28'
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-14-14-51'
 dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
     data_dir,
     color_mode='grayscale',
@@ -90,12 +90,12 @@ plt.savefig(os.path.join(save_dir, 'samples.png'))
 # Plot episode return
 data_dir0 = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-13-14-22'
 if not data_dir0==data_dir:
-    acc_returns = np.load(os.path.join(data_dir0, 'acc_returns.npy'))
-    curr_return = np.load(os.path.join(data_dir, 'return.npy'))
-    acc_returns = np.concatenate((acc_returns, curr_return))
-    np.save(os.path.join(data_dir, 'acc_returns.npy'), acc_returns)
+    acc_rets = np.load(os.path.join(data_dir0, 'accumulated_returns.npy'))
+    ret = np.load(os.path.join(data_dir, 'return.npy')) # current return
+    acc_rets = np.append(acc_rets, ret)
+    np.save(os.path.join(data_dir, 'accumulated_returns.npy'), acc_rets)
     plt.clf()
-    plt.plot(acc_returns)
+    plt.plot(acc_rets)
     plt.show()
 
 
