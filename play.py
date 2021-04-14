@@ -23,7 +23,7 @@ num_act = 10
 dim_act = 1
 total_steps = 300
 time_stamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
-image_dir = os.path.join('/ssd', versions+'_experience', time_stamp, 'views')
+image_dir = os.path.join('/ssd', version+'_experience', time_stamp, 'views')
 if not os.path.exists(image_dir):
     try:
         os.makedirs(image_dir)
@@ -105,7 +105,7 @@ with open(os.path.join(os.path.dirname(image_dir), 'elapsed_time.txt'), 'w') as 
 replay_data = memory.get()
 np.save(os.path.join(os.path.dirname(image_dir), 'replay_data.npy'), replay_data)
 np.save(os.path.join(os.path.dirname(image_dir), 'stepwise_frame_ids.npy'), stepwise_frame_ids)
-np.save(os.path.join(os.path.dirname(model_dir), 'return.npy'), ret)
+np.save(os.path.join(os.path.dirname(image_dir), 'return.npy'), ret)
 # When everything done, release the capture and stop motors
 eye.release()
 cv2.destroyAllWindows()
