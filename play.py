@@ -16,11 +16,11 @@ from drivers.mecanum_driver import MecanumDriver
 from agents.ima_macromphalus import OnPolicyBuffer, IntrinsicMotivationAgent
 
 # Parameters
+version = 'macromphalus'
 dim_view = (128,128,1)
 dim_latent = 8
 num_act = 10
 dim_act = 1
-version = 'macromphalus'
 total_steps = 300
 time_stamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
 image_dir = os.path.join('/ssd', versions+'_experience', time_stamp, 'views')
@@ -46,18 +46,6 @@ brain.imaginator.dynamics_net = tf.keras.models.load_model(os.path.join(model_di
 brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(model_dir, 'actor'))
 brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(model_dir, 'critic'))
 
-# Get mecanum driver ready
-wheels = MecanumDriver() # need integrate mecdriver into agent in next version
-# Get agent ready
-brain = IntrinsicMotivationAgent(dim_view, dim_latent, num_act, dim_act)
-version = 'macromphalus'
-model_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-03-05-16-00') # typically use the last saved models
-brain.vae.encoder.encoder_net = tf.keras.models.load_model(os.path.join(model_dir, 'encoder'))
-brain.vae.decoder.decoder_net = tf.keras.models.load_model(os.path.join(model_dir, 'decoder'))
-brain.imaginator.dynamics_net = tf.keras.models.load_model(os.path.join(model_dir, 'imaginator'))
-brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(model_dir, 'actor'))
-brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(model_dir, 'critic'))
-memory = OnPolicyBuffer(max_size=total_steps)
 # Ignition parameters
 frame_counter = 0
 step_counter = 0
