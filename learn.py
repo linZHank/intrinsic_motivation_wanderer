@@ -25,7 +25,7 @@ version = 'macromphalus'
 # batch_size = 64
 
 # Load agent
-load_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-04-13-14-22')
+load_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-04-13-17-29')
 brain = IntrinsicMotivationAgent(dim_view=dim_view, dim_latent=dim_latent, num_act=num_act, dim_act=dim_act)
 brain.vae.encoder.encoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
 brain.vae.decoder.decoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
@@ -34,7 +34,7 @@ brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(load_dir, 'a
 brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 
 # Load data
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-13-14-22'
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-14-12-28'
 dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
     data_dir,
     color_mode='grayscale',
@@ -47,13 +47,13 @@ replay_data = np.load(os.path.join(data_dir, 'replay_data.npy'), allow_pickle=Tr
 # Train policy
 train_ac = input('Train actor-critic? [y/n]')
 if train_ac=='y':
-    loss_pi, loss_val, loss_info = brain.ac.train(replay_data, num_epochs=20)
+    loss_pi, loss_val, loss_info = brain.ac.train(replay_data, num_epochs=50)
 else:
     loss_pi, loss_val = 0, 0
 # train autoencoder
 loss_vae = brain.vae.train(dataset_views, num_epochs=20)
 # train imaginator
-loss_imn = brain.imaginator.train(replay_data, num_epochs=20)
+loss_imn = brain.imaginator.train(replay_data, num_epochs=50)
 
 
 # Save models

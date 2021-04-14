@@ -58,7 +58,7 @@ loss_pi, loss_val, loss_info = agent.ac.train(data, 80)
 # train_vae
 dataset = tf.keras.preprocessing.image_dataset_from_directory(os.path.dirname(img_dir), color_mode='grayscale', image_size=(128,128), batch_size=128)
 dataset = dataset.map(lambda x, y: x/255.)
-loss_elbo = agent.vae.train(dataset, num_epochs=20)
+loss_elbo = agent.vae.train(dataset, num_epochs=2)
 
 fig, ax = plt.subplots(figsize=(10,20), nrows=10, ncols=3)
 for img in dataset.take(1):
