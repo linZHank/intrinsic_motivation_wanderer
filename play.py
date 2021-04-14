@@ -99,7 +99,7 @@ except KeyboardInterrupt:
     wheels.halt()
     exit()
 # Finish memory
-_, val, _ = brain.make_decision(tf.expand_dims(obs,0))
+_, val, _ = brain.ac.make_decision(tf.expand_dims(obs,0))
 memory.finish_path(val)
 
 # Save valuable items
