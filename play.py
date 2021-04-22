@@ -38,7 +38,7 @@ wheels = MecanumDriver() # need integrate mecdriver into agent in next version
 brain = IntrinsicMotivationAgent(dim_view=dim_view, dim_latent=dim_latent, num_act=num_act, dim_act=dim_act)
 memory = OnPolicyBuffer(max_size=total_steps)
 # Load models
-model_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-04-22-11-15')
+model_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-04-22-11-51')
 brain = IntrinsicMotivationAgent(dim_view=dim_view, dim_latent=dim_latent, num_act=num_act, dim_act=dim_act)
 brain.vae.encoder.encoder_net = tf.keras.models.load_model(os.path.join(model_dir, 'encoder'))
 brain.vae.decoder.decoder_net = tf.keras.models.load_model(os.path.join(model_dir, 'decoder'))

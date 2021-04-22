@@ -25,7 +25,7 @@ version = 'macromphalus'
 # batch_size = 64
 
 # Load agent
-load_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-04-14-15-39')
+load_dir = os.path.join(sys.path[0], 'model_dir', version, '2021-04-22-11-15')
 brain = IntrinsicMotivationAgent(dim_view=dim_view, dim_latent=dim_latent, num_act=num_act, dim_act=dim_act)
 brain.vae.encoder.encoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'encoder'))
 brain.vae.decoder.decoder_net = tf.keras.models.load_model(os.path.join(load_dir, 'decoder'))
@@ -34,7 +34,7 @@ brain.ac.actor.policy_net = tf.keras.models.load_model(os.path.join(load_dir, 'a
 brain.ac.critic.value_net = tf.keras.models.load_model(os.path.join(load_dir, 'critic'))
 
 # Load data
-data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-22-10-58'
+data_dir = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-22-11-19'
 dataset_views = tf.keras.preprocessing.image_dataset_from_directory(
     data_dir,
     color_mode='grayscale',
@@ -88,7 +88,7 @@ plt.tight_layout()
 plt.savefig(os.path.join(save_dir, 'samples.png'))
 
 # Plot episode return
-data_dir0 = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-14-15-22'
+data_dir0 = '/media/palebluedotian0/Micron1100_2T/playground/intrinsic_motivation_wanderer/macromphalus_experience/2021-04-22-10-58'
 if not data_dir0==data_dir:
     acc_rets = np.load(os.path.join(data_dir0, 'accumulated_returns.npy'))
     ret = np.load(os.path.join(data_dir, 'return.npy')) # current return
